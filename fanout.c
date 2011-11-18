@@ -60,34 +60,75 @@ void append_nullbyte (char *s) {
 }
 
 void subscribe (int fd, char *channel) {
+    printf ("subscribing client %d to channel %s\n", fd, channel);
+
     int len;
+
     len = sizeof (struct subscription);
     if ((subscription_i = malloc (len)) == NULL) {
-        printf("Memory Error.\n");
+        printf ("memory Error.\n");
         return;
     }
-    printf ("subscribing client %d to channel %s\n", fd, channel);
+
     memset (subscription_i, 0, len);
     subscription_i->fd = fd;
-    subscription_i->channel = channel;
-    //subscription_i->channel[strlen (subscription_i->channel) + 1] = '\0';
-    printf ("channel set to %s\n", subscription_i->channel);
+
+    asprintf (&subscription_i->channel, "%s", channel);
     subscription_i->next = subscription_head;
     if (subscription_head != NULL)
         subscription_head->previous = subscription_i;
     subscription_head = subscription_i;
 }
 
-void announce (char *channel, char *message) {
-    printf ("attempting to announce message %s to channel %s\n", message, channel);
+
+void remove_subscription (struct subscription *s) {
+    printf ("unsubscribing client %d from channel %s\n", s->fd, s->channel);
+    if (s->next != NULL) {
+        s->next->previous = s->previous;
+    }
+    if (s->previous != NULL) {
+        s->previous->next = s->next;
+    }
+    
+    if (s == subscription_head) {
+        subscription_head = s->next;
+    }
+}
+
+void unsubscribe (int fd, char *channel) {
     subscription_i = subscription_head;
     while (subscription_i != NULL) {
-        printf ("testing subscription for client %d on channel %s\n", subscription_i->fd, subscription_i->channel);
-        if (subscription_i->channel == channel) {
-            printf ("announcing message %s to %d on channel %s\n", message, subscription_i->fd, channel);
+        if (fd == subscription_i->fd && ! strcmp (channel, subscription_i->channel)) {
+            remove_subscription (subscription_i);
         }
         subscription_i = subscription_i->next;
     }
+}
+
+void shutdown_client (struct client *c) {
+    subscription_i = subscription_head;
+    while (subscription_i != NULL) {
+        if (c->fd == subscription_i->fd) {
+            remove_subscription (subscription_i);
+        }
+        subscription_i = subscription_i->next;
+    }
+}
+
+void announce (char *channel, char *message) {
+    printf ("attempting to announce message %s to channel %s\n", message, channel);
+    char *s = NULL;
+    asprintf (&s, "%s!%s\n", channel, message);
+    subscription_i = subscription_head;
+    while (subscription_i != NULL) {
+        printf ("testing subscription for client %d on channel %s\n", subscription_i->fd, subscription_i->channel);
+        if ( ! strcmp (subscription_i->channel, channel)) {
+            printf ("announcing message %s to %d on channel %s\n", message, subscription_i->fd, channel);
+            send (subscription_i->fd, s, strlen (s), MSG_DONTWAIT);
+        }
+        subscription_i = subscription_i->next;
+    }
+    free (s);
 }
 
 int main(int argc, char *argv[])
@@ -118,7 +159,7 @@ int main(int argc, char *argv[])
     serv_addr.sin_addr.s_addr = INADDR_ANY;
     serv_addr.sin_port = htons(portno);
     
-    setsockopt (srvsock,SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    setsockopt (srvsock,SOL_SOCKET, SO_REUSEADDR, &yes, sizeof (yes));
     if (bind(srvsock, (struct sockaddr *) &serv_addr,
               sizeof(serv_addr)) < 0)
     {
@@ -168,32 +209,37 @@ int main(int argc, char *argv[])
             }
             client_head = client_i;
 
-            len = sizeof(cli_addr);
+            len = sizeof (cli_addr);
             client_i->fd = accept(srvsock, (struct sockaddr*)&cli_addr, &len);
-            FD_SET(client_i->fd, &readset);
+            FD_SET (client_i->fd, &readset);
             if (client_i->fd > max) {
                 max = client_i->fd;
             }
 
             fanout_debug("New client socket connect");
             send (client_i->fd, "debug!connected...\n", strlen ("debug!connected...\n"), MSG_DONTWAIT);
+            subscribe (client_i->fd, "all");
        }
 
         // Process events of other sockets...
         client_i = client_head;
         while (client_i != NULL) {
+            printf ("processing client %d\n", client_i->fd);
             if (FD_ISSET (client_i->fd, &tempset)) {
                 // Process data from socket i
-                res = recv(client_head->fd, buffer, 1024, 0);
+                res = recv(client_i->fd, buffer, 1024, 0);
                 if (res <= 0) {
                     fanout_debug ("client socket disconnected");
 
-                    if (client_i->next != NULL)
+                    if (client_i->next != NULL) {
                         client_i->next->previous = client_i->previous;
-                    if (client_i->previous != NULL)
+                    }
+                    if (client_i->previous != NULL) {
                         client_i->previous->next = client_i->next;
+                    }
 
                     FD_CLR (client_i->fd, &readset);
+                    shutdown_client (client_i);
                     shutdown (client_i->fd, 2);
                     close (client_i->fd);
                 } else {
@@ -223,6 +269,7 @@ int main(int argc, char *argv[])
                                     subscribe (client_i->fd, channel);
                                 } else if ( ! strcmp (action, "unsubscribe")) {
                                     //perform unsubscribe
+                                    unsubscribe (client_i->fd, channel);
                                 } else {
                                     fanout_debug ("invalid action attempted");
                                 }
