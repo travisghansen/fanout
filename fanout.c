@@ -25,16 +25,117 @@ struct client
 };
 
 
+struct channel
+{
+    char *name;
+    struct channel *next;
+    struct channel *previous;
+};
+
 struct subscription
 {
-    int fd;
-    char *channel;
+    struct client *client;
+    struct channel *channel;
     struct subscription *next;
     struct subscription *previous;
 };
 
+
+struct client *client_head = NULL;
 struct subscription *subscription_head = NULL;
-struct subscription *subscription_i = NULL;
+struct channel *channel_head = NULL;
+
+
+
+struct channel *get_channel (const char *channel)
+{
+    struct channel *channel_i = channel_head;
+
+    while (channel_i != NULL) {
+        if ( ! strcmp (channel, channel_i->name))
+            return channel_i;
+        channel_i = channel_i->next;
+    }
+
+    int len;
+
+    len = sizeof (struct channel);
+    if ((channel_i = malloc (len)) == NULL) {
+        printf ("memory Error.\n");
+        return;
+    }
+
+    asprintf (&channel_i->name, "%s", channel);
+    channel_i->next = channel_head;
+    if (channel_head != NULL)
+        channel_head->previous = channel_i;
+    channel_head = channel_i;
+    return channel_i;
+}
+
+struct client *get_client (int fd)
+{
+    struct client *client_i = NULL;
+
+    client_i = client_head;
+    while (client_i != NULL) {
+        if (client_i->fd == fd)
+            return client_i;
+        client_i = client_i->next;
+    }
+}
+
+
+struct subscription *get_subscription (struct client *c, struct channel *channel)
+{
+    struct subscription *subscription_i = subscription_head;
+    while (subscription_i != NULL) {
+        if (subscription_i->channel == channel && c == subscription_i->client)
+            return subscription_i;
+        subscription_i = subscription_i->next;
+    }
+}
+
+void remove_channel (struct channel *c)
+{
+    printf ("remove channel %s\n", c->name);
+    if (c->next != NULL) {
+        c->next->previous = c->previous;
+    }
+    if (c->previous != NULL) {
+        c->previous->next = c->next;
+    }
+    if (c == channel_head) {
+        channel_head = c->next;
+    }
+}
+
+
+void destroy_channel (struct channel *c)
+{
+    free (c->name);
+    free (c->next);
+    free (c->previous);
+    free (c);
+}
+
+
+void destroy_client (struct client *c)
+{
+    free (c->input_buffer);
+    free (c->output_buffer);
+    free (c->next);
+    free (c->previous);
+}
+
+
+void destroy_subscription (struct subscription *s)
+{
+    free (s->next);
+    free (s->previous);
+    free (s);
+}
+
 
 void fanout_error(const char *msg)
 {
@@ -49,20 +150,16 @@ void fanout_debug (const char *msg)
 }
 
 
-size_t easy_write (int fd, const char *s)
-{
-    return (write (fd, s, strlen (s)));
-}
+void subscribe (struct client *c, char *channel) {
+    if (get_subscription (c, get_channel (channel)) != NULL) {
+        printf ("client %d already subscribed to channel %s\n", c->fd, channel);
+        return;
+    }
 
-void append_nullbyte (char *s) {
-    size_t len = strlen (s);
-    s[len + 1] = '\0';
-}
-
-void subscribe (int fd, char *channel) {
-    printf ("subscribing client %d to channel %s\n", fd, channel);
+    printf ("subscribing client %d to channel %s\n", c->fd, channel);
 
     int len;
+    struct subscription *subscription_i = NULL;
 
     len = sizeof (struct subscription);
     if ((subscription_i = malloc (len)) == NULL) {
@@ -71,9 +168,11 @@ void subscribe (int fd, char *channel) {
     }
 
     memset (subscription_i, 0, len);
-    subscription_i->fd = fd;
+    subscription_i->client = c;
+    subscription_i->channel = get_channel (channel);
 
-    asprintf (&subscription_i->channel, "%s", channel);
+    printf ("subscribed to channel %s\n", subscription_i->channel->name);
+
     subscription_i->next = subscription_head;
     if (subscription_head != NULL)
         subscription_head->previous = subscription_i;
@@ -82,54 +181,87 @@ void subscribe (int fd, char *channel) {
 
 
 void remove_subscription (struct subscription *s) {
-    printf ("unsubscribing client %d from channel %s\n", s->fd, s->channel);
+    printf ("unsubscribing client %d from channel %s\n", s->client->fd, s->channel->name);
     if (s->next != NULL) {
         s->next->previous = s->previous;
     }
     if (s->previous != NULL) {
         s->previous->next = s->next;
     }
-    
     if (s == subscription_head) {
         subscription_head = s->next;
     }
 }
 
-void unsubscribe (int fd, char *channel) {
-    subscription_i = subscription_head;
+
+void remove_client (struct client *c) {
+    printf ("removing client %d from service\n", c->fd);
+    if (c->next != NULL) {
+        c->next->previous = c->previous;
+    }
+    if (c->previous != NULL) {
+        c->previous->next = c->next;
+    }
+    if (c == client_head) {
+        client_head = c->next;
+    }
+}
+
+
+
+void unsubscribe (struct client *c, char *channel) {
+    struct subscription *subscription_i = subscription_head;
+
     while (subscription_i != NULL) {
-        if (fd == subscription_i->fd && ! strcmp (channel, subscription_i->channel)) {
+        if (c == subscription_i->client && get_channel (channel) == subscription_i->channel) {
             remove_subscription (subscription_i);
+            destroy_subscription (subscription_i);
+            return;
         }
         subscription_i = subscription_i->next;
     }
 }
 
+
 void shutdown_client (struct client *c) {
-    subscription_i = subscription_head;
+    struct subscription *subscription_i = subscription_head;
+
     while (subscription_i != NULL) {
-        if (c->fd == subscription_i->fd) {
+        if (c == subscription_i->client)
             remove_subscription (subscription_i);
-        }
         subscription_i = subscription_i->next;
     }
+
+    remove_client (c);
+    FD_CLR (c->fd, &readset);
+    shutdown (c->fd, 2);
+    close (c->fd);
+    //destroy_client (c);
 }
+
+
+void client_write (struct client *c, const char *data)
+{
+    send (c->fd, data, strlen (data), 0);
+}
+
 
 void announce (char *channel, char *message) {
     printf ("attempting to announce message %s to channel %s\n", message, channel);
     char *s = NULL;
     asprintf (&s, "%s!%s\n", channel, message);
-    subscription_i = subscription_head;
+    struct subscription *subscription_i = subscription_head;
     while (subscription_i != NULL) {
-        printf ("testing subscription for client %d on channel %s\n", subscription_i->fd, subscription_i->channel);
-        if ( ! strcmp (subscription_i->channel, channel)) {
-            printf ("announcing message %s to %d on channel %s\n", message, subscription_i->fd, channel);
-            send (subscription_i->fd, s, strlen (s), MSG_DONTWAIT);
+        printf ("testing subscription for client %d on channel %s\n", subscription_i->client->fd, subscription_i->channel->name);
+        if ( ! strcmp (subscription_i->channel->name, channel)) {
+            printf ("announcing message %s to %d on channel %s\n", message, subscription_i->client->fd, channel);
+            client_write (subscription_i->client, s);
         }
         subscription_i = subscription_i->next;
     }
     free (s);
 }
+
 
 int main(int argc, char *argv[])
 {
@@ -139,11 +271,11 @@ int main(int argc, char *argv[])
     char *line, *action, *channel, *message, *output;
     char buffer[1024];
 
+    struct client *client_i = NULL;
+    struct client *client_tmp = NULL;
+
     socklen_t clilen;
     struct sockaddr_in serv_addr, cli_addr;
-
-    struct client *client_head = NULL;
-    struct client *client_i = NULL;
 
     if (argc < 2)
         fanout_error ("ERROR, no port provided");
@@ -163,14 +295,14 @@ int main(int argc, char *argv[])
     if (bind(srvsock, (struct sockaddr *) &serv_addr,
               sizeof(serv_addr)) < 0)
     {
-        fanout_error("ERROR on binding");
+        fanout_error ("ERROR on binding");
     }
 
-    listen(srvsock,5);
+    listen (srvsock,5);
     
     max = srvsock;
 
-    FD_SET(srvsock, &readset);
+    FD_SET (srvsock, &readset);
 
     while (1)
     {
@@ -197,10 +329,10 @@ int main(int argc, char *argv[])
         if (FD_ISSET (srvsock, &tempset)) {
             len = sizeof (struct client);
             if ((client_i = malloc(len)) == NULL) {
-                printf("Memory Error.\n");
+                printf ("memory Error.\n");
                 continue;
             }
-            memset(client_i, 0, len);
+            memset (client_i, 0, len);
             
             //Shove current new connection in the front of the line
             client_i->next = client_head;
@@ -210,38 +342,33 @@ int main(int argc, char *argv[])
             client_head = client_i;
 
             len = sizeof (cli_addr);
-            client_i->fd = accept(srvsock, (struct sockaddr*)&cli_addr, &len);
+            client_i->fd = accept (srvsock, (struct sockaddr *)&cli_addr, &len);
             FD_SET (client_i->fd, &readset);
             if (client_i->fd > max) {
                 max = client_i->fd;
             }
 
-            fanout_debug("New client socket connect");
-            send (client_i->fd, "debug!connected...\n", strlen ("debug!connected...\n"), MSG_DONTWAIT);
-            subscribe (client_i->fd, "all");
+            fanout_debug ("new client socket connect");
+            //send (client_i->fd, "debug!connected...\n", strlen ("debug!connected...\n"), 0);
+            client_write (client_i, "debug!connected...\n");
+            subscribe (client_i, "all");
        }
 
         // Process events of other sockets...
         client_i = client_head;
         while (client_i != NULL) {
-            printf ("processing client %d\n", client_i->fd);
             if (FD_ISSET (client_i->fd, &tempset)) {
                 // Process data from socket i
+                printf ("processing client %d\n", client_i->fd);
                 res = recv(client_i->fd, buffer, 1024, 0);
                 if (res <= 0) {
                     fanout_debug ("client socket disconnected");
 
-                    if (client_i->next != NULL) {
-                        client_i->next->previous = client_i->previous;
-                    }
-                    if (client_i->previous != NULL) {
-                        client_i->previous->next = client_i->next;
-                    }
+                    client_tmp = client_i;
+                    client_i = client_i->next;
 
-                    FD_CLR (client_i->fd, &readset);
-                    shutdown_client (client_i);
-                    shutdown (client_i->fd, 2);
-                    close (client_i->fd);
+                    shutdown_client (client_tmp);
+                    continue;
                 } else {
                     // Process data in buffer
                     printf ("%d bytes read: [%.*s]\n", res, (res - 1), buffer);
@@ -249,7 +376,7 @@ int main(int argc, char *argv[])
                     if (line != NULL) {
                         if ( ! strcmp (line, "ping")) {
                             asprintf (&message, "%d\n", time(NULL));
-                            send (client_i->fd, message, strlen (message), MSG_DONTWAIT);
+                            client_write (client_i, message);
                             free (message);
                             message = NULL;
                         } else {
@@ -258,18 +385,16 @@ int main(int argc, char *argv[])
                             message = strtok (NULL, " ");
                             if (action == NULL) {
                                 fanout_debug ("received garbage from client");
-                                continue;
                             } else {
                                 if ( ! strcmp (action, "announce")) {
                                     //perform announce
                                     announce (channel, message);
                                 } else if ( ! strcmp (action, "subscribe")) {
                                     //perform subscribe
-                                    //append_nullbyte (channel);
-                                    subscribe (client_i->fd, channel);
+                                    subscribe (client_i, channel);
                                 } else if ( ! strcmp (action, "unsubscribe")) {
                                     //perform unsubscribe
-                                    unsubscribe (client_i->fd, channel);
+                                    unsubscribe (client_i, channel);
                                 } else {
                                     fanout_debug ("invalid action attempted");
                                 }
