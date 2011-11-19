@@ -341,8 +341,8 @@ int main(int argc, char *argv[])
             }
             client_head = client_i;
 
-            len = sizeof (cli_addr);
-            client_i->fd = accept (srvsock, (struct sockaddr *)&cli_addr, &len);
+            clilen = sizeof (cli_addr);
+            client_i->fd = accept (srvsock, (struct sockaddr *)&cli_addr, &clilen);
             FD_SET (client_i->fd, &readset);
             if (client_i->fd > max) {
                 max = client_i->fd;
