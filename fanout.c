@@ -43,6 +43,7 @@ char *substr (const char *s, int start, int stop);
 void fanout_error(const char *msg);
 void fanout_debug (const char *msg);
 
+int channel_exists (const char *channel);
 struct channel *get_channel (const char *channel);
 void remove_channel (struct channel *c);
 void destroy_channel (struct channel *c);
@@ -239,6 +240,18 @@ void fanout_debug (const char *msg)
 }
 
 
+int channel_exists (const char *channel)
+{
+    struct channel *channel_i = channel_head;
+    while (channel_i != NULL) {
+        if ( ! strcmp (channel, channel_i->name))
+            return 1;
+        channel_i = channel_i->next;
+    }
+    return 0;
+}
+
+
 struct channel *get_channel (const char *channel)
 {
     struct channel *channel_i = channel_head;
@@ -398,7 +411,7 @@ void client_process_input_buffer (struct client *c)
                     message = substr (line,
                                        strlen (action) + strlen (channel) + 2,
                                        strlen (line));
-                    if (strpos (channel, "!") == -1 && strlen (message) > 0)
+                    if (channel_exists (channel) && strlen (message) > 0)
                         announce (channel, message);
                 } else if ( ! strcmp (action, "subscribe")) {
                     //perform subscribe
