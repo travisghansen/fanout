@@ -56,7 +56,8 @@ void client_write (struct client *c, const char *data);
 void client_process_input_buffer (struct client *c);
 
 
-struct subscription *get_subscription (struct client *c, struct channel *channel);
+struct subscription *get_subscription (struct client *c,
+                                        struct channel *channel);
 void remove_subscription (struct subscription *s);
 void destroy_subscription (struct subscription *s);
 
@@ -79,6 +80,7 @@ int main(int argc, char *argv[])
 {
     int srvsock, portno, res, len;
     u_int yes = 1;
+    u_int listen_backlog = 25;
     char buffer[1024];
 
     struct client *client_i = NULL;
@@ -108,30 +110,27 @@ int main(int argc, char *argv[])
         fanout_error ("ERROR on binding");
     }
 
-    listen (srvsock,5);
-    
+    if (listen (srvsock, listen_backlog) == -1)
+        fanout_error ("ERROR listening on server socket");
+
     max = srvsock;
 
     FD_SET (srvsock, &readset);
 
-    while (1)
-    {
+    while (1) {
         fanout_debug ("server waiting for new activity");
-        
-        //memcpy(&tempset, &readset, sizeof(readset));
+
         tempset = readset;
         // Wait indefinitely for read events 
         res = select (max+1, &tempset, NULL, NULL, NULL);
 
-        if (res < 0)
-        {
+        if (res < 0) {
             printf ("something bad happened\n");
             continue;
         }
 
-        if (res == 0)
-        {
-            printf ("this should happen when timeout is met, in our case never\n");
+        if (res == 0) {
+            printf ("timeout is met, in our case never\n");
             continue;
         }
 
@@ -152,7 +151,8 @@ int main(int argc, char *argv[])
             client_head = client_i;
 
             clilen = sizeof (cli_addr);
-            client_i->fd = accept (srvsock, (struct sockaddr *)&cli_addr, &clilen);
+            client_i->fd = accept (srvsock, (struct sockaddr *)&cli_addr,
+                                    &clilen);
             FD_SET (client_i->fd, &readset);
             if (client_i->fd > max) {
                 max = client_i->fd;
@@ -184,7 +184,8 @@ int main(int argc, char *argv[])
                     printf ("%d bytes read: [%.*s]\n", res, (res - 1), buffer);
                     if (client_i->input_buffer != NULL) {
                         fanout_debug ("input buffer contains data");
-                        asprintf (&client_i->input_buffer, "%s%s", client_i->input_buffer, buffer);
+                        asprintf (&client_i->input_buffer, "%s%s",
+                                   client_i->input_buffer, buffer);
                     } else {
                         fanout_debug ("input buffer empty, intializing");
                         asprintf (&client_i->input_buffer, "%s", buffer);
@@ -358,9 +359,11 @@ void client_write (struct client *c, const char *data)
         if (sent == -1)
             break;
         printf ("wrote %d bytes\n", sent);
-        c->output_buffer = substr (c->output_buffer, sent, strlen (c->output_buffer));
+        c->output_buffer = substr (c->output_buffer, sent,
+                                    strlen (c->output_buffer));
     }
-    printf ("remaining buffer is %d chars: %s\n", (u_int) strlen (c->output_buffer), c->output_buffer);
+    printf ("remaining output buffer is %d chars: %s\n",
+             (u_int) strlen (c->output_buffer), c->output_buffer);
 }
 
 
@@ -392,7 +395,9 @@ void client_process_input_buffer (struct client *c)
             } else {
                 if ( ! strcmp (action, "announce")) {
                     //perform announce
-                    message = substr (line, strlen (action) + strlen (channel) + 2, strlen (line));
+                    message = substr (line,
+                                       strlen (action) + strlen (channel) + 2,
+                                       strlen (line));
                     announce (channel, message);
                 } else if ( ! strcmp (action, "subscribe")) {
                     //perform subscribe
@@ -406,14 +411,17 @@ void client_process_input_buffer (struct client *c)
             }
         }
 
-        c->input_buffer = substr (c->input_buffer, i + 1, strlen (c->input_buffer));
+        c->input_buffer = substr (c->input_buffer, i + 1,
+                                   strlen (c->input_buffer));
     }
 
-    printf ("remaining buffer is %d chars: %s\n", (int) strlen (c->input_buffer), c->input_buffer);
+    printf ("remaining input buffer is %d chars: %s\n",
+             (int) strlen (c->input_buffer), c->input_buffer);
 }
 
 
-struct subscription *get_subscription (struct client *c, struct channel *channel)
+struct subscription *get_subscription (struct client *c,
+                                        struct channel *channel)
 {
     struct subscription *subscription_i = subscription_head;
     while (subscription_i != NULL) {
@@ -426,7 +434,8 @@ struct subscription *get_subscription (struct client *c, struct channel *channel
 
 void remove_subscription (struct subscription *s)
 {
-    printf ("unsubscribing client %d from channel %s\n", s->client->fd, s->channel->name);
+    printf ("unsubscribing client %d from channel %s\n", s->client->fd,
+             s->channel->name);
     if (s->next != NULL) {
         s->next->previous = s->previous;
     }
@@ -447,14 +456,17 @@ void destroy_subscription (struct subscription *s)
 
 void announce (char *channel, char *message)
 {
-    printf ("attempting to announce message %s to channel %s\n", message, channel);
+    printf ("attempting to announce message %s to channel %s\n", message,
+             channel);
     char *s = NULL;
     asprintf (&s, "%s!%s\n", channel, message);
     struct subscription *subscription_i = subscription_head;
     while (subscription_i != NULL) {
-        printf ("testing subscription for client %d on channel %s\n", subscription_i->client->fd, subscription_i->channel->name);
+        printf ("testing subscription for client %d on channel %s\n",
+                 subscription_i->client->fd, subscription_i->channel->name);
         if ( ! strcmp (subscription_i->channel->name, channel)) {
-            printf ("announcing message %s to %d on channel %s\n", message, subscription_i->client->fd, channel);
+            printf ("announcing message %s to %d on channel %s\n", message,
+                     subscription_i->client->fd, channel);
             client_write (subscription_i->client, s);
         }
         subscription_i = subscription_i->next;
@@ -499,7 +511,8 @@ void unsubscribe (struct client *c, char *channel)
     struct subscription *subscription_i = subscription_head;
 
     while (subscription_i != NULL) {
-        if (c == subscription_i->client && get_channel (channel) == subscription_i->channel) {
+        if (c == subscription_i->client &&
+             get_channel (channel) == subscription_i->channel) {
             remove_subscription (subscription_i);
             destroy_subscription (subscription_i);
             return;
