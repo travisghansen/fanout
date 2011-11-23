@@ -46,6 +46,32 @@ struct subscription *subscription_head = NULL;
 struct channel *channel_head = NULL;
 
 
+int strpos (char *haystack, char *needle) {
+    int i;
+    for (i = 0; i <= strlen (haystack); i++) {
+        if (haystack[i] == *needle)
+            return i;
+    }
+    return -1;
+   char *p = strstr (haystack, needle);
+   if (p)
+      return p - haystack;
+   return -1;   // Not found = -1.
+}
+
+
+char *substr (const char *s, int start, int stop) {
+    char *v;
+    asprintf(&v, "%.*s", stop - start + 1, &s[start]);
+    return v;
+}
+
+
+void str_swap_free(char *target, char *source) {
+    char *tmp = target;
+    target = source;
+    free (tmp);
+}
 
 struct channel *get_channel (const char *channel)
 {
@@ -114,8 +140,6 @@ void remove_channel (struct channel *c)
 void destroy_channel (struct channel *c)
 {
     free (c->name);
-    free (c->next);
-    free (c->previous);
     free (c);
 }
 
@@ -124,15 +148,12 @@ void destroy_client (struct client *c)
 {
     free (c->input_buffer);
     free (c->output_buffer);
-    free (c->next);
-    free (c->previous);
+    free (c);
 }
 
 
 void destroy_subscription (struct subscription *s)
 {
-    free (s->next);
-    free (s->previous);
     free (s);
 }
 
@@ -236,13 +257,78 @@ void shutdown_client (struct client *c) {
     FD_CLR (c->fd, &readset);
     shutdown (c->fd, 2);
     close (c->fd);
-    //destroy_client (c);
+    destroy_client (c);
 }
 
 
 void client_write (struct client *c, const char *data)
 {
-    send (c->fd, data, strlen (data), 0);
+    int sent;
+
+    if (c->output_buffer != NULL) {
+        printf ("buffer contains data\n");
+        asprintf (&c->output_buffer, "%s%s", c->output_buffer, data);
+    } else {
+        printf ("buffer empty, intializing\n");
+        asprintf (&c->output_buffer, "%s", data);
+    }
+
+    while (strlen (c->output_buffer) > 0) {
+        sent = send (c->fd, c->output_buffer, strlen (c->output_buffer), 0);
+        if (sent == -1)
+            break;
+        printf ("wrote %d bytes\n", sent);
+        c->output_buffer = substr (c->output_buffer, sent, strlen (c->output_buffer));
+    }
+    printf ("remaining buffer is %d chars: %s\n", strlen (c->output_buffer), c->output_buffer);
+}
+
+
+void client_process_input_buffer (struct client *c) {
+    char *line;
+    char *message;
+    char *action;
+    char *channel;
+
+    int i;
+
+    printf ("full buffer\n\n%s\n\n", c->input_buffer);
+    while ((i = strpos (c->input_buffer, "\n")) >= 0) {
+        line = substr (c->input_buffer, 0, i -1);
+        printf ("buffer has a newline at char %d\n", i);
+        printf ("line is %d chars: %s\n", strlen (line), line);
+
+        if ( ! strcmp (line, "ping")) {
+            asprintf (&message, "%d\n", time(NULL));
+            client_write (c, message);
+            free (message);
+            message = NULL;
+        } else {
+            action = strtok (line, " ");
+            channel = strtok (NULL, " ");
+            if (action == NULL) {
+                fanout_debug ("received garbage from client");
+            } else {
+                if ( ! strcmp (action, "announce")) {
+                    //perform announce
+                    message = substr (line, strlen (action) + strlen (channel) + 2, strlen (line));
+                    announce (channel, message);
+                } else if ( ! strcmp (action, "subscribe")) {
+                    //perform subscribe
+                    subscribe (c, channel);
+                } else if ( ! strcmp (action, "unsubscribe")) {
+                    //perform unsubscribe
+                    unsubscribe (c, channel);
+                } else {
+                    fanout_debug ("invalid action attempted");
+                }
+            }
+        }
+
+        c->input_buffer = substr (c->input_buffer, i + 1, strlen (c->input_buffer));
+    }
+
+    printf ("remaining buffer is %d chars: %s\n", strlen (c->input_buffer), c->input_buffer);
 }
 
 
@@ -360,6 +446,7 @@ int main(int argc, char *argv[])
             if (FD_ISSET (client_i->fd, &tempset)) {
                 // Process data from socket i
                 printf ("processing client %d\n", client_i->fd);
+                memset (buffer, 0, sizeof (buffer));
                 res = recv(client_i->fd, buffer, 1024, 0);
                 if (res <= 0) {
                     fanout_debug ("client socket disconnected");
@@ -372,37 +459,14 @@ int main(int argc, char *argv[])
                 } else {
                     // Process data in buffer
                     printf ("%d bytes read: [%.*s]\n", res, (res - 1), buffer);
-                    line = strtok (buffer, "\n");
-                    if (line != NULL) {
-                        if ( ! strcmp (line, "ping")) {
-                            asprintf (&message, "%d\n", time(NULL));
-                            client_write (client_i, message);
-                            free (message);
-                            message = NULL;
-                        } else {
-                            action = strtok (line, " ");
-                            channel = strtok (NULL, " ");
-                            message = strtok (NULL, " ");
-                            if (action == NULL) {
-                                fanout_debug ("received garbage from client");
-                            } else {
-                                if ( ! strcmp (action, "announce")) {
-                                    //perform announce
-                                    announce (channel, message);
-                                } else if ( ! strcmp (action, "subscribe")) {
-                                    //perform subscribe
-                                    subscribe (client_i, channel);
-                                } else if ( ! strcmp (action, "unsubscribe")) {
-                                    //perform unsubscribe
-                                    unsubscribe (client_i, channel);
-                                } else {
-                                    fanout_debug ("invalid action attempted");
-                                }
-                            }
-                        }
+                    if (client_i->input_buffer != NULL) {
+                        printf ("buffer contains data\n");
+                        asprintf (&client_i->input_buffer, "%s%s", client_i->input_buffer, buffer);
                     } else {
-                        fanout_debug ("received garbage from client");
+                        printf ("buffer empty, intializing\n");
+                        asprintf (&client_i->input_buffer, "%s", buffer);
                     }
+                    client_process_input_buffer (client_i);
                 }
             }
             client_i = client_i->next;
