@@ -81,7 +81,7 @@ int main(int argc, char *argv[])
     int srvsock, portno, res, len;
     u_int yes = 1;
     u_int listen_backlog = 25;
-    char buffer[1024];
+    char buffer[1025];
 
     struct client *client_i = NULL;
     struct client *client_tmp = NULL;
@@ -398,13 +398,16 @@ void client_process_input_buffer (struct client *c)
                     message = substr (line,
                                        strlen (action) + strlen (channel) + 2,
                                        strlen (line));
-                    announce (channel, message);
+                    if (strpos (channel, "!") == -1 && strlen (message) > 0)
+                        announce (channel, message);
                 } else if ( ! strcmp (action, "subscribe")) {
                     //perform subscribe
-                    subscribe (c, channel);
+                    if (strpos (channel, "!") == -1)
+                        subscribe (c, channel);
                 } else if ( ! strcmp (action, "unsubscribe")) {
                     //perform unsubscribe
-                    unsubscribe (c, channel);
+                    if (strpos (channel, "!") == -1)
+                        unsubscribe (c, channel);
                 } else {
                     fanout_debug ("invalid action attempted");
                 }
