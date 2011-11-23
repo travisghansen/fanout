@@ -66,11 +66,9 @@ void subscribe (struct client *c, char *channel);
 void unsubscribe (struct client *c, char *channel);
 
 
+// GLOBAL VARS
 fd_set readset, tempset;
-
 int max;
-int subscription_count = 0;
-
 struct client *client_head = NULL;
 struct subscription *subscription_head = NULL;
 struct channel *channel_head = NULL;
@@ -160,8 +158,7 @@ int main(int argc, char *argv[])
                 max = client_i->fd;
             }
 
-            fanout_debug ("new client socket connect");
-            //send (client_i->fd, "debug!connected...\n", strlen ("debug!connected...\n"), 0);
+            fanout_debug ("client socket connected");
             client_write (client_i, "debug!connected...\n");
             subscribe (client_i, "all");
        }
@@ -186,10 +183,10 @@ int main(int argc, char *argv[])
                     // Process data in buffer
                     printf ("%d bytes read: [%.*s]\n", res, (res - 1), buffer);
                     if (client_i->input_buffer != NULL) {
-                        printf ("buffer contains data\n");
+                        fanout_debug ("input buffer contains data");
                         asprintf (&client_i->input_buffer, "%s%s", client_i->input_buffer, buffer);
                     } else {
-                        printf ("buffer empty, intializing\n");
+                        fanout_debug ("input buffer empty, intializing");
                         asprintf (&client_i->input_buffer, "%s", buffer);
                     }
                     client_process_input_buffer (client_i);
@@ -237,7 +234,7 @@ void fanout_error(const char *msg)
 
 void fanout_debug (const char *msg)
 {
-    printf("debug: %s\n", msg);
+    printf("[%d] DEBUG: %s\n", (u_int) time(NULL), msg);
 }
 
 
@@ -349,10 +346,10 @@ void client_write (struct client *c, const char *data)
     int sent;
 
     if (c->output_buffer != NULL) {
-        printf ("buffer contains data\n");
+        fanout_debug ("output buffer contains data");
         asprintf (&c->output_buffer, "%s%s", c->output_buffer, data);
     } else {
-        printf ("buffer empty, intializing\n");
+        fanout_debug ("output buffer empty, intializing");
         asprintf (&c->output_buffer, "%s", data);
     }
 
@@ -480,7 +477,7 @@ void subscribe (struct client *c, char *channel)
 
     len = sizeof (struct subscription);
     if ((subscription_i = malloc (len)) == NULL) {
-        printf ("memory Error.\n");
+        fanout_debug ("memory error trying to create new subscription");
         return;
     }
 
