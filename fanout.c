@@ -41,6 +41,7 @@ struct subscription
 int strpos (const char *haystack, const char *needle);
 char *substr (const char *s, int start, int stop);
 void str_swap_free (char **target, char *source);
+char *str_append (char *target, const char *data);
 void fanout_error(const char *msg);
 void fanout_debug (const char *msg);
 
@@ -188,8 +189,8 @@ int main(int argc, char *argv[])
                     printf ("%d bytes read: [%.*s]\n", res, (res - 1), buffer);
                     if (client_i->input_buffer != NULL) {
                         fanout_debug ("input buffer contains data");
-                        asprintf (&client_i->input_buffer, "%s%s",
-                                   client_i->input_buffer, buffer);
+                        client_i->input_buffer = str_append (
+                                                client_i->input_buffer, buffer);
                     } else {
                         fanout_debug ("input buffer empty, intializing");
                         asprintf (&client_i->input_buffer, "%s", buffer);
@@ -233,6 +234,14 @@ void str_swap_free (char **target, char *source)
     free (tmp);
 }
 
+
+char *str_append (char *target, const char *data)
+{
+    int len = strlen (target) + strlen (data) + 1;
+    target = realloc (target, len);
+
+    return strcat (target, data);
+}
 
 void fanout_error(const char *msg)
 {
@@ -384,7 +393,7 @@ void client_write (struct client *c, const char *data)
 
     if (c->output_buffer != NULL) {
         fanout_debug ("output buffer contains data");
-        asprintf (&c->output_buffer, "%s%s", c->output_buffer, data);
+        c->output_buffer = str_append (c->output_buffer, data);
     } else {
         fanout_debug ("output buffer empty, intializing");
         asprintf (&c->output_buffer, "%s", data);
@@ -436,6 +445,7 @@ void client_process_input_buffer (struct client *c)
                                        strlen (line));
                     if (channel_exists (channel) && strlen (message) > 0)
                         announce (channel, message);
+                    free (message);
                 } else if ( ! strcmp (action, "subscribe")) {
                     //perform subscribe
                     if (strpos (channel, "!") == -1)
@@ -450,8 +460,9 @@ void client_process_input_buffer (struct client *c)
             }
         }
 
-        c->input_buffer = substr (c->input_buffer, i + 1,
-                                   strlen (c->input_buffer));
+        str_swap_free (&c->input_buffer, substr (c->input_buffer, i + 1,
+                                   strlen (c->input_buffer)));
+        free (line);
     }
 
     printf ("remaining input buffer is %d chars: %s\n",
