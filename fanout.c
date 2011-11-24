@@ -43,8 +43,9 @@ char *substr (const char *s, int start, int stop);
 void fanout_error(const char *msg);
 void fanout_debug (const char *msg);
 
-int channel_exists (const char *channel);
-struct channel *get_channel (const char *channel);
+int channel_exists (const char *channel_name);
+int channel_has_subscription (struct channel *c);
+struct channel *get_channel (const char *channel_name);
 void remove_channel (struct channel *c);
 void destroy_channel (struct channel *c);
 
@@ -63,9 +64,9 @@ void remove_subscription (struct subscription *s);
 void destroy_subscription (struct subscription *s);
 
 
-void announce (char *channel, char *message);
-void subscribe (struct client *c, char *channel);
-void unsubscribe (struct client *c, char *channel);
+void announce (const char *channel_name, const char *message);
+void subscribe (struct client *c, const char *channel_name);
+void unsubscribe (struct client *c, const char *channel_name);
 
 
 // GLOBAL VARS
@@ -240,11 +241,11 @@ void fanout_debug (const char *msg)
 }
 
 
-int channel_exists (const char *channel)
+int channel_exists (const char *channel_name)
 {
     struct channel *channel_i = channel_head;
     while (channel_i != NULL) {
-        if ( ! strcmp (channel, channel_i->name))
+        if ( ! strcmp (channel_name, channel_i->name))
             return 1;
         channel_i = channel_i->next;
     }
@@ -252,12 +253,24 @@ int channel_exists (const char *channel)
 }
 
 
-struct channel *get_channel (const char *channel)
+int channel_has_subscription (struct channel *c)
+{
+    struct subscription *subscription_i = subscription_head;
+    while (subscription_i != NULL) {
+        if (subscription_i->channel == c)
+            return 1;
+        subscription_i = subscription_i->next;
+    }
+    return 0;
+}
+
+
+struct channel *get_channel (const char *channel_name)
 {
     struct channel *channel_i = channel_head;
 
     while (channel_i != NULL) {
-        if ( ! strcmp (channel, channel_i->name))
+        if ( ! strcmp (channel_name, channel_i->name))
             return channel_i;
         channel_i = channel_i->next;
     }
@@ -269,7 +282,7 @@ struct channel *get_channel (const char *channel)
         fanout_error ("memory error");
     }
 
-    asprintf (&channel_i->name, "%s", channel);
+    asprintf (&channel_i->name, "%s", channel_name);
     channel_i->next = channel_head;
     if (channel_head != NULL)
         channel_head->previous = channel_i;
@@ -280,7 +293,7 @@ struct channel *get_channel (const char *channel)
 
 void remove_channel (struct channel *c)
 {
-    printf ("remove channel %s\n", c->name);
+    printf ("removing unused channel %s\n", c->name);
     if (c->next != NULL) {
         c->next->previous = c->previous;
     }
@@ -334,8 +347,10 @@ void shutdown_client (struct client *c)
     struct subscription *subscription_i = subscription_head;
 
     while (subscription_i != NULL) {
-        if (c == subscription_i->client)
+        if (c == subscription_i->client) {
             remove_subscription (subscription_i);
+            destroy_subscription (subscription_i);
+        }
         subscription_i = subscription_i->next;
     }
 
@@ -461,6 +476,11 @@ void remove_subscription (struct subscription *s)
     if (s == subscription_head) {
         subscription_head = s->next;
     }
+
+    if ( ! channel_has_subscription (s->channel)) {
+        remove_channel (s->channel);
+        destroy_channel (s->channel);
+    }
 }
 
 
@@ -470,7 +490,7 @@ void destroy_subscription (struct subscription *s)
 }
 
 
-void announce (char *channel, char *message)
+void announce (const char *channel, const char *message)
 {
     printf ("attempting to announce message %s to channel %s\n", message,
              channel);
@@ -491,14 +511,14 @@ void announce (char *channel, char *message)
 }
 
 
-void subscribe (struct client *c, char *channel)
+void subscribe (struct client *c, const char *channel_name)
 {
-    if (get_subscription (c, get_channel (channel)) != NULL) {
-        printf ("client %d already subscribed to channel %s\n", c->fd, channel);
+    if (get_subscription (c, get_channel (channel_name)) != NULL) {
+        printf ("client %d already subscribed to channel %s\n", c->fd, channel_name);
         return;
     }
 
-    printf ("subscribing client %d to channel %s\n", c->fd, channel);
+    printf ("subscribing client %d to channel %s\n", c->fd, channel_name);
 
     int len;
     struct subscription *subscription_i = NULL;
@@ -511,7 +531,7 @@ void subscribe (struct client *c, char *channel)
 
     memset (subscription_i, 0, len);
     subscription_i->client = c;
-    subscription_i->channel = get_channel (channel);
+    subscription_i->channel = get_channel (channel_name);
 
     printf ("subscribed to channel %s\n", subscription_i->channel->name);
 
@@ -522,13 +542,15 @@ void subscribe (struct client *c, char *channel)
 }
 
 
-void unsubscribe (struct client *c, char *channel)
+void unsubscribe (struct client *c, const char *channel_name)
 {
     struct subscription *subscription_i = subscription_head;
+    if ( ! channel_exists (channel_name))
+        return;
+    struct channel *channel = get_channel (channel_name);
 
     while (subscription_i != NULL) {
-        if (c == subscription_i->client &&
-             get_channel (channel) == subscription_i->channel) {
+        if (c == subscription_i->client && channel == subscription_i->channel) {
             remove_subscription (subscription_i);
             destroy_subscription (subscription_i);
             return;
