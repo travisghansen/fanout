@@ -38,7 +38,7 @@ struct subscription
     struct subscription *previous;
 };
 
-int strpos (const char *haystack, const char *needle);
+int strcpos (const char *haystack, const char c);
 char *substr (const char *s, int start, int stop);
 void str_swap_free (char **target, char *source);
 char *str_append (char *target, const char *data);
@@ -82,7 +82,7 @@ struct channel *channel_head = NULL;
 
 int main(int argc, char *argv[])
 {
-    int srvsock, portno, res, len;
+    int srvsock, portno, res;
     u_int yes = 1;
     u_int listen_backlog = 25;
     char buffer[1025];
@@ -140,13 +140,10 @@ int main(int argc, char *argv[])
 
         // Process new connections first 
         if (FD_ISSET (srvsock, &tempset)) {
-            len = sizeof (struct client);
-            if ((client_i = malloc(len)) == NULL) {
+            if ((client_i = calloc (1, sizeof (struct client))) == NULL) {
                 fanout_debug ("memory error");
                 continue;
             }
-
-            memset (client_i, 0, len);
 
             //Shove current new connection in the front of the line
             client_i->next = client_head;
@@ -208,11 +205,11 @@ int main(int argc, char *argv[])
 
 
 
-int strpos (const char *haystack, const char *needle)
+int strcpos (const char *haystack, const char c)
 {
     int i;
     for (i = 0; i <= strlen (haystack); i++) {
-        if (haystack[i] == *needle)
+        if (haystack[i] == c)
             return i;
     }
     return -1;
@@ -229,9 +226,8 @@ char *substr (const char *s, int start, int stop)
 
 void str_swap_free (char **target, char *source)
 {
-    char *tmp = *target;
+    free (*target);
     *target = source;
-    free (tmp);
 }
 
 
@@ -290,15 +286,11 @@ struct channel *get_channel (const char *channel_name)
         channel_i = channel_i->next;
     }
 
-    int len;
-
     fanout_debug ("creating new channel");
-    len = sizeof (struct channel);
-    if ((channel_i = malloc (len)) == NULL) {
+    if ((channel_i = calloc (1, sizeof (struct channel))) == NULL) {
         fanout_error ("memory error");
     }
 
-    memset (channel_i, 0, len);
     asprintf (&channel_i->name, "%s", channel_name);
     channel_i->next = channel_head;
     if (channel_head != NULL)
@@ -422,7 +414,7 @@ void client_process_input_buffer (struct client *c)
     int i;
 
     printf ("full buffer\n\n%s\n\n", c->input_buffer);
-    while ((i = strpos (c->input_buffer, "\n")) >= 0) {
+    while ((i = strcpos (c->input_buffer, '\n')) >= 0) {
         line = substr (c->input_buffer, 0, i -1);
         printf ("buffer has a newline at char %d\n", i);
         printf ("line is %d chars: %s\n", (u_int) strlen (line), line);
@@ -448,11 +440,11 @@ void client_process_input_buffer (struct client *c)
                     free (message);
                 } else if ( ! strcmp (action, "subscribe")) {
                     //perform subscribe
-                    if (strpos (channel, "!") == -1)
+                    if (strcpos (channel, '!') == -1)
                         subscribe (c, channel);
                 } else if ( ! strcmp (action, "unsubscribe")) {
                     //perform unsubscribe
-                    if (strpos (channel, "!") == -1)
+                    if (strcpos (channel, '!') == -1)
                         unsubscribe (c, channel);
                 } else {
                     fanout_debug ("invalid action attempted");
@@ -539,16 +531,13 @@ void subscribe (struct client *c, const char *channel_name)
 
     printf ("subscribing client %d to channel %s\n", c->fd, channel_name);
 
-    int len;
     struct subscription *subscription_i = NULL;
 
-    len = sizeof (struct subscription);
-    if ((subscription_i = malloc (len)) == NULL) {
+    if ((subscription_i = calloc (1, sizeof (struct subscription))) == NULL) {
         fanout_debug ("memory error trying to create new subscription");
         return;
     }
 
-    memset (subscription_i, 0, len);
     subscription_i->client = c;
     subscription_i->channel = get_channel (channel_name);
 
