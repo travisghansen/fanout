@@ -38,7 +38,7 @@ struct subscription
     struct subscription *previous;
 };
 
-int strpos (char *haystack, char *needle);
+int strpos (const char *haystack, const char *needle);
 char *substr (const char *s, int start, int stop);
 void fanout_error(const char *msg);
 void fanout_debug (const char *msg);
@@ -205,7 +205,7 @@ int main(int argc, char *argv[])
 
 
 
-int strpos (char *haystack, char *needle)
+int strpos (const char *haystack, const char *needle)
 {
     int i;
     for (i = 0; i <= strlen (haystack); i++) {
@@ -213,10 +213,6 @@ int strpos (char *haystack, char *needle)
             return i;
     }
     return -1;
-   char *p = strstr (haystack, needle);
-   if (p)
-      return p - haystack;
-   return -1;   // Not found = -1.
 }
 
 
