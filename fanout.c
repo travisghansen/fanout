@@ -40,6 +40,7 @@ struct subscription
 
 int strpos (const char *haystack, const char *needle);
 char *substr (const char *s, int start, int stop);
+void str_swap_free (char **target, char *source);
 void fanout_error(const char *msg);
 void fanout_debug (const char *msg);
 
