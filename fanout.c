@@ -28,6 +28,7 @@ struct channel
     char *name;
     struct channel *next;
     struct channel *previous;
+    u_int subscription_count;
 };
 
 struct subscription
@@ -266,11 +267,8 @@ int channel_exists (const char *channel_name)
 
 int channel_has_subscription (struct channel *c)
 {
-    struct subscription *subscription_i = subscription_head;
-    while (subscription_i != NULL) {
-        if (subscription_i->channel == c)
-            return 1;
-        subscription_i = subscription_i->next;
+    if (c->subscription_count > 0) {
+        return 1;
     }
     return 0;
 }
@@ -488,6 +486,8 @@ void remove_subscription (struct subscription *s)
         subscription_head = s->next;
     }
 
+    s->channel->subscription_count--;
+
     if ( ! channel_has_subscription (s->channel)) {
         remove_channel (s->channel);
         destroy_channel (s->channel);
@@ -540,6 +540,7 @@ void subscribe (struct client *c, const char *channel_name)
 
     subscription_i->client = c;
     subscription_i->channel = get_channel (channel_name);
+    subscription_i->channel->subscription_count++;
 
     printf ("subscribed to channel %s\n", subscription_i->channel->name);
 
