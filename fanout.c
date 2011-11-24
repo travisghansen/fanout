@@ -143,8 +143,9 @@ int main(int argc, char *argv[])
                 fanout_debug ("memory error");
                 continue;
             }
+
             memset (client_i, 0, len);
-            
+
             //Shove current new connection in the front of the line
             client_i->next = client_head;
             if (client_head != NULL) {
@@ -224,6 +225,14 @@ char *substr (const char *s, int start, int stop)
 }
 
 
+void str_swap_free (char **target, char *source)
+{
+    char *tmp = *target;
+    *target = source;
+    free (tmp);
+}
+
+
 void fanout_error(const char *msg)
 {
     perror(msg);
@@ -273,11 +282,13 @@ struct channel *get_channel (const char *channel_name)
 
     int len;
 
+    fanout_debug ("creating new channel");
     len = sizeof (struct channel);
     if ((channel_i = malloc (len)) == NULL) {
         fanout_error ("memory error");
     }
 
+    memset (channel_i, 0, len);
     asprintf (&channel_i->name, "%s", channel_name);
     channel_i->next = channel_head;
     if (channel_head != NULL)
@@ -383,8 +394,8 @@ void client_write (struct client *c, const char *data)
         if (sent == -1)
             break;
         printf ("wrote %d bytes\n", sent);
-        c->output_buffer = substr (c->output_buffer, sent,
-                                    strlen (c->output_buffer));
+        str_swap_free (&c->output_buffer, substr (c->output_buffer, sent,
+                        strlen (c->output_buffer)));
     }
     printf ("remaining output buffer is %d chars: %s\n",
              (u_int) strlen (c->output_buffer), c->output_buffer);
