@@ -185,14 +185,8 @@ int main(int argc, char *argv[])
                 } else {
                     // Process data in buffer
                     printf ("%d bytes read: [%.*s]\n", res, (res - 1), buffer);
-                    if (client_i->input_buffer != NULL) {
-                        fanout_debug ("input buffer contains data");
-                        client_i->input_buffer = str_append (
+                    client_i->input_buffer = str_append (
                                                 client_i->input_buffer, buffer);
-                    } else {
-                        fanout_debug ("input buffer empty, intializing");
-                        asprintf (&client_i->input_buffer, "%s", buffer);
-                    }
                     client_process_input_buffer (client_i);
                 }
             }
@@ -234,6 +228,15 @@ void str_swap_free (char **target, char *source)
 
 char *str_append (char *target, const char *data)
 {
+    if (data == NULL) {
+        return target;
+    }
+
+    if (target == NULL) {
+        asprintf (&target, "%s", data);
+        return target;
+    }
+
     int len = strlen (target) + strlen (data) + 1;
     target = realloc (target, len);
 
@@ -352,13 +355,13 @@ void remove_client (struct client *c)
 void shutdown_client (struct client *c)
 {
     struct subscription *subscription_i = subscription_head;
+    struct subscription *subscription_tmp;
 
     while (subscription_i != NULL) {
-        if (c == subscription_i->client) {
-            remove_subscription (subscription_i);
-            destroy_subscription (subscription_i);
-        }
+        subscription_tmp = subscription_i;
         subscription_i = subscription_i->next;
+        if (c == subscription_tmp->client)
+            unsubscribe (c, subscription_tmp->channel->name);
     }
 
     remove_client (c);
@@ -381,13 +384,7 @@ void client_write (struct client *c, const char *data)
 {
     int sent;
 
-    if (c->output_buffer != NULL) {
-        fanout_debug ("output buffer contains data");
-        c->output_buffer = str_append (c->output_buffer, data);
-    } else {
-        fanout_debug ("output buffer empty, intializing");
-        asprintf (&c->output_buffer, "%s", data);
-    }
+    c->output_buffer = str_append (c->output_buffer, data);
 
     while (strlen (c->output_buffer) > 0) {
         sent = send (c->fd, c->output_buffer, strlen (c->output_buffer), 0);
@@ -485,13 +482,6 @@ void remove_subscription (struct subscription *s)
     if (s == subscription_head) {
         subscription_head = s->next;
     }
-
-    s->channel->subscription_count--;
-
-    if ( ! channel_has_subscription (s->channel)) {
-        remove_channel (s->channel);
-        destroy_channel (s->channel);
-    }
 }
 
 
@@ -562,6 +552,13 @@ void unsubscribe (struct client *c, const char *channel_name)
         if (c == subscription_i->client && channel == subscription_i->channel) {
             remove_subscription (subscription_i);
             destroy_subscription (subscription_i);
+
+            channel->subscription_count--;
+
+            if ( ! channel_has_subscription (channel)) {
+                remove_channel (channel);
+                destroy_channel (channel);
+            }
             return;
         }
         subscription_i = subscription_i->next;
