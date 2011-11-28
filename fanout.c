@@ -9,8 +9,11 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <time.h>
+#include <getopt.h>
+#include <stdarg.h>
 
 
 struct client
@@ -44,7 +47,7 @@ char *substr (const char *s, int start, int stop);
 void str_swap_free (char **target, char *source);
 char *str_append (char *target, const char *data);
 void fanout_error(const char *msg);
-void fanout_debug (const char *msg);
+void fanout_debug (int level, const char *format, ...);
 
 int channel_exists (const char *channel_name);
 int channel_has_subscription (struct channel *c);
@@ -75,17 +78,28 @@ void unsubscribe (struct client *c, const char *channel_name);
 // GLOBAL VARS
 fd_set readset, tempset;
 int max;
+static int daemonize = 0;
+
+FILE *logfile;
+
+// 0 = ERROR
+// 1 = WARNING
+// 2 = INFO
+// 3 = DEBUG
+int debug_level = 1;
 struct client *client_head = NULL;
 struct subscription *subscription_head = NULL;
 struct channel *channel_head = NULL;
 
 
 
-int main(int argc, char *argv[])
+int main (int argc, char *argv[])
 {
-    int srvsock, portno, res;
+    int srvsock, res;
+    int portno = 1986;
     u_int yes = 1;
     u_int listen_backlog = 25;
+    FILE *pidfile;
     char buffer[1025];
 
     struct client *client_i = NULL;
@@ -94,23 +108,74 @@ int main(int argc, char *argv[])
     socklen_t clilen;
     struct sockaddr_in serv_addr, cli_addr;
 
-    if (argc < 2)
-        fanout_error ("ERROR, no port provided");
-    
-    srvsock = socket(AF_INET, SOCK_STREAM, 0);
-    
+    static struct option long_options[] = {
+        {"port", 1, 0, 0},
+        {"daemon", 0, &daemonize, 1},
+        {"logfile", 1, 0, 0},
+        {"pidfile", 1, 0, 0},
+        {"debug-level", 1, 0, 0},
+        {NULL, 0, NULL, 0}
+    };
+
+    int c;
+    int option_index = 0;
+    while ((c = getopt_long (argc, argv, "",
+                              long_options, &option_index)) != -1) {
+        switch (c) {
+            case 0:
+                switch (option_index) {
+                    // port
+                    case 0:
+                        portno = atoi (optarg);
+                        break;
+                    // logfile
+                    case 2:
+                        if ((logfile = fopen (optarg, "a")) == NULL) {
+                            fanout_error ("ERROR cannot open logfile");
+                        }
+                        break;
+                    // pidfile
+                    case 3:
+                        if ((pidfile = fopen (optarg, "w+")) == NULL) {
+                            fanout_error ("ERROR cannot open pidfile");
+                        }
+                        break;
+                    //daemon
+                    case 4:
+                        debug_level = atoi (optarg);
+                        break;
+                }
+                break;
+            default:
+                exit (EXIT_FAILURE);
+        }
+    }
+
+    if (optind < argc) {
+        fanout_debug (0, "ERROR invalid args: ");
+        while (optind < argc)
+            printf ("%s ", argv[optind++]);
+        printf ("\n");
+        exit (EXIT_FAILURE);
+    }
+
+
+    if ( ! portno > 0) {
+        fanout_debug (0, "ERROR invalid port\n");
+        exit (EXIT_FAILURE);
+    }
+
+    srvsock = socket (AF_INET, SOCK_STREAM, 0);
     if (srvsock < 0)
-        fanout_error("ERROR opening socket");
+        fanout_error ("ERROR opening socket");
     
-    bzero((char *) &serv_addr, sizeof(serv_addr));
-    portno = atoi(argv[1]);
+    bzero((char *) &serv_addr, sizeof (serv_addr));
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
-    serv_addr.sin_port = htons(portno);
+    serv_addr.sin_port = htons (portno);
     
-    setsockopt (srvsock,SOL_SOCKET, SO_REUSEADDR, &yes, sizeof (yes));
-    if (bind(srvsock, (struct sockaddr *) &serv_addr,
-              sizeof(serv_addr)) < 0)
+    setsockopt (srvsock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof (yes));
+    if (bind (srvsock, (struct sockaddr *) &serv_addr, sizeof (serv_addr)) < 0)
     {
         fanout_error ("ERROR on binding");
     }
@@ -122,27 +187,68 @@ int main(int argc, char *argv[])
 
     FD_SET (srvsock, &readset);
 
+    if (daemonize) {
+        pid_t pid, sid;
+
+        /* Fork off the parent process */
+        pid = fork ();
+        if (pid < 0) {
+            exit (EXIT_FAILURE);
+        }
+        /* If we got a good PID, then
+           we can exit the parent process. */
+        if (pid > 0) {
+            /* Write pid to file */
+            if (pidfile != NULL) {
+                fprintf (pidfile, "%d\n", (int) pid);
+                fclose (pidfile);
+            }
+            exit (EXIT_SUCCESS);
+        }
+
+        /* Change the file mode mask */
+        umask (0);
+
+        /* Create a new SID for the child process */
+        sid = setsid ();
+        if (sid < 0) {
+                /* Log any failure */
+                exit (EXIT_FAILURE);
+        }
+
+        /* Close out the standard file descriptors */
+        close(STDIN_FILENO);
+        close(STDOUT_FILENO);
+        close(STDERR_FILENO);
+    }
+
+    /* Change the current working directory */
+    if ((chdir ("/")) < 0) {
+        /* Log the failure */
+        exit (EXIT_FAILURE);
+    }
+
     while (1) {
-        fanout_debug ("server waiting for new activity");
+        fanout_debug (3, "server waiting for new activity\n");
 
         tempset = readset;
         // Wait indefinitely for read events 
         res = select (max+1, &tempset, NULL, NULL, NULL);
 
         if (res < 0) {
-            printf ("something bad happened\n");
+            fanout_debug (1, "something bad happened\n");
             continue;
         }
 
         if (res == 0) {
-            printf ("timeout is met, in our case never\n");
+            fanout_debug (1, "timeout is met, in our case never\n");
             continue;
         }
 
         // Process new connections first 
         if (FD_ISSET (srvsock, &tempset)) {
             if ((client_i = calloc (1, sizeof (struct client))) == NULL) {
-                fanout_debug ("memory error");
+                fanout_debug (0, "memory error\n");
                 continue;
             }
 
@@ -161,7 +267,7 @@ int main(int argc, char *argv[])
                 max = client_i->fd;
             }
 
-            fanout_debug ("client socket connected");
+            fanout_debug (2, "client socket connected\n");
             client_write (client_i, "debug!connected...\n");
             subscribe (client_i, "all");
        }
@@ -171,11 +277,11 @@ int main(int argc, char *argv[])
         while (client_i != NULL) {
             if (FD_ISSET (client_i->fd, &tempset)) {
                 // Process data from socket i
-                printf ("processing client %d\n", client_i->fd);
+                fanout_debug (3, "processing client %d\n", client_i->fd);
                 memset (buffer, 0, sizeof (buffer));
                 res = recv (client_i->fd, buffer, 1024, 0);
                 if (res <= 0) {
-                    fanout_debug ("client socket disconnected");
+                    fanout_debug (2, "client socket disconnected\n");
 
                     client_tmp = client_i;
                     client_i = client_i->next;
@@ -184,7 +290,8 @@ int main(int argc, char *argv[])
                     continue;
                 } else {
                     // Process data in buffer
-                    printf ("%d bytes read: [%.*s]\n", res, (res - 1), buffer);
+                    fanout_debug (3, "%d bytes read: [%.*s]\n", res, (res - 1),
+                                   buffer);
                     client_i->input_buffer = str_append (
                                                 client_i->input_buffer, buffer);
                     client_process_input_buffer (client_i);
@@ -250,9 +357,46 @@ void fanout_error(const char *msg)
 }
 
 
-void fanout_debug (const char *msg)
+void fanout_debug (int level, const char *format, ...)
 {
-    printf("[%d] DEBUG: %s\n", (u_int) time(NULL), msg);
+    char *s_level;
+
+    switch (level) {
+        case 0:
+            s_level = "ERROR";
+            break;
+        case 1:
+            s_level = "WARNING";
+            break;
+        case 2:
+            s_level = "INFO";
+            break;
+        default:
+            s_level = "DEBUG";
+            break;
+    }
+
+    char *message;
+    asprintf(&message, "[%d] %s: ", (u_int) time(NULL), s_level);
+    char *data;
+    va_list args;
+    va_start(args, format);
+    vasprintf (&data, format, args);
+    va_end(args);
+
+    message = str_append (message, data);
+
+    if (debug_level >= level) {
+        if (daemonize && logfile != NULL) {
+            fprintf (logfile, "%s", message);
+            fflush (logfile);
+        } else {
+            printf ("%s", message);
+        }
+    }
+
+    free (data);
+    free (message);
 }
 
 
@@ -287,7 +431,7 @@ struct channel *get_channel (const char *channel_name)
         channel_i = channel_i->next;
     }
 
-    fanout_debug ("creating new channel");
+    fanout_debug (2, "creating new channel\n");
     if ((channel_i = calloc (1, sizeof (struct channel))) == NULL) {
         fanout_error ("memory error");
     }
@@ -303,7 +447,7 @@ struct channel *get_channel (const char *channel_name)
 
 void remove_channel (struct channel *c)
 {
-    printf ("removing unused channel %s\n", c->name);
+    fanout_debug (3, "removing unused channel %s\n", c->name);
     if (c->next != NULL) {
         c->next->previous = c->previous;
     }
@@ -339,7 +483,7 @@ struct client *get_client (int fd)
 
 void remove_client (struct client *c)
 {
-    printf ("removing client %d from service\n", c->fd);
+    fanout_debug (3, "removing client %d from service\n", c->fd);
     if (c->next != NULL) {
         c->next->previous = c->previous;
     }
@@ -390,11 +534,11 @@ void client_write (struct client *c, const char *data)
         sent = send (c->fd, c->output_buffer, strlen (c->output_buffer), 0);
         if (sent == -1)
             break;
-        printf ("wrote %d bytes\n", sent);
+        fanout_debug (3, "wrote %d bytes\n", sent);
         str_swap_free (&c->output_buffer, substr (c->output_buffer, sent,
                         strlen (c->output_buffer)));
     }
-    printf ("remaining output buffer is %d chars: %s\n",
+    fanout_debug (3, "remaining output buffer is %d chars: %s\n",
              (u_int) strlen (c->output_buffer), c->output_buffer);
 }
 
@@ -408,11 +552,11 @@ void client_process_input_buffer (struct client *c)
 
     int i;
 
-    printf ("full buffer\n\n%s\n\n", c->input_buffer);
+    fanout_debug (3, "full buffer\n\n%s\n\n", c->input_buffer);
     while ((i = strcpos (c->input_buffer, '\n')) >= 0) {
         line = substr (c->input_buffer, 0, i -1);
-        printf ("buffer has a newline at char %d\n", i);
-        printf ("line is %d chars: %s\n", (u_int) strlen (line), line);
+        fanout_debug (3, "buffer has a newline at char %d\n", i);
+        fanout_debug (3, "line is %d chars: %s\n", (u_int) strlen (line), line);
 
         if ( ! strcmp (line, "ping")) {
             asprintf (&message, "%d\n", (u_int) time(NULL));
@@ -423,7 +567,7 @@ void client_process_input_buffer (struct client *c)
             action = strtok (line, " ");
             channel = strtok (NULL, " ");
             if (action == NULL) {
-                fanout_debug ("received garbage from client");
+                fanout_debug (3, "received garbage from client\n");
             } else {
                 if ( ! strcmp (action, "announce")) {
                     //perform announce
@@ -442,7 +586,7 @@ void client_process_input_buffer (struct client *c)
                     if (strcpos (channel, '!') == -1)
                         unsubscribe (c, channel);
                 } else {
-                    fanout_debug ("invalid action attempted");
+                    fanout_debug (3, "invalid action attempted\n");
                 }
             }
         }
@@ -452,7 +596,7 @@ void client_process_input_buffer (struct client *c)
         free (line);
     }
 
-    printf ("remaining input buffer is %d chars: %s\n",
+    fanout_debug (3, "remaining input buffer is %d chars: %s\n",
              (int) strlen (c->input_buffer), c->input_buffer);
 }
 
@@ -471,8 +615,6 @@ struct subscription *get_subscription (struct client *c,
 
 void remove_subscription (struct subscription *s)
 {
-    printf ("unsubscribing client %d from channel %s\n", s->client->fd,
-             s->channel->name);
     if (s->next != NULL) {
         s->next->previous = s->previous;
     }
@@ -493,21 +635,23 @@ void destroy_subscription (struct subscription *s)
 
 void announce (const char *channel, const char *message)
 {
-    printf ("attempting to announce message %s to channel %s\n", message,
-             channel);
+    fanout_debug (3, "attempting to announce message %s to channel %s\n",
+                   message, channel);
     char *s = NULL;
     asprintf (&s, "%s!%s\n", channel, message);
     struct subscription *subscription_i = subscription_head;
     while (subscription_i != NULL) {
-        printf ("testing subscription for client %d on channel %s\n",
-                 subscription_i->client->fd, subscription_i->channel->name);
+        fanout_debug (3, "testing subscription for client %d on channel %s\n",
+                       subscription_i->client->fd,
+                       subscription_i->channel->name);
         if ( ! strcmp (subscription_i->channel->name, channel)) {
-            printf ("announcing message %s to %d on channel %s\n", message,
-                     subscription_i->client->fd, channel);
+            fanout_debug (3, "announcing message %s to %d on channel %s\n",
+                           message, subscription_i->client->fd, channel);
             client_write (subscription_i->client, s);
         }
         subscription_i = subscription_i->next;
     }
+    fanout_debug (2, "announced messge %s\n", s);
     free (s);
 }
 
@@ -515,16 +659,15 @@ void announce (const char *channel, const char *message)
 void subscribe (struct client *c, const char *channel_name)
 {
     if (get_subscription (c, get_channel (channel_name)) != NULL) {
-        printf ("client %d already subscribed to channel %s\n", c->fd, channel_name);
+        fanout_debug (3, "client %d already subscribed to channel %s\n",
+                       c->fd, channel_name);
         return;
     }
-
-    printf ("subscribing client %d to channel %s\n", c->fd, channel_name);
 
     struct subscription *subscription_i = NULL;
 
     if ((subscription_i = calloc (1, sizeof (struct subscription))) == NULL) {
-        fanout_debug ("memory error trying to create new subscription");
+        fanout_debug (1, "memory error trying to create new subscription\n");
         return;
     }
 
@@ -532,7 +675,8 @@ void subscribe (struct client *c, const char *channel_name)
     subscription_i->channel = get_channel (channel_name);
     subscription_i->channel->subscription_count++;
 
-    printf ("subscribed to channel %s\n", subscription_i->channel->name);
+    fanout_debug (2, "subscribed client %d to channel %s\n", c->fd,
+                   subscription_i->channel->name);
 
     subscription_i->next = subscription_head;
     if (subscription_head != NULL)
@@ -552,6 +696,9 @@ void unsubscribe (struct client *c, const char *channel_name)
         if (c == subscription_i->client && channel == subscription_i->channel) {
             remove_subscription (subscription_i);
             destroy_subscription (subscription_i);
+
+            fanout_debug (2, "unsubscribed client %d from channel %s\n", c->fd,
+                           channel_name);
 
             channel->subscription_count--;
 
