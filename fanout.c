@@ -651,7 +651,7 @@ void announce (const char *channel, const char *message)
         }
         subscription_i = subscription_i->next;
     }
-    fanout_debug (2, "announced messge %s\n", s);
+    fanout_debug (2, "announced messge %s", s);
     free (s);
 }
 
