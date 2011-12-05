@@ -1,0 +1,29 @@
+Fanout is meant to creat a simple pubsub server to handle sending messages and
+receiving messages on different channels.
+
+Protocol:
+
+subcribe <channel>
+unsubscribe <channel>
+announce <channel> <message>
+
+Each request sent to the server must end with a \n.  This means neither
+<channel> nor <message> can contain a \n itself directly (of course all of
+them can be encoded ie: base64).
+
+<channel> must not contain the '!' character or spaces.
+<message> can contain the '!' character
+
+Each message announced on a channel will be sent out as:
+
+<channel>!<message>
+
+ending with \n to all the subscribed clients.
+
+
+2 special channels are automatically created and should not be used.
+
+all - every client connected to the service is subscribed to this channel
+
+debug - is used to send back messages to individual clients, for example
+upon connection "debug!connected..." is sent to confirm connection.
