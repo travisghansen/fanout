@@ -566,7 +566,7 @@ void client_process_input_buffer (struct client *c)
         } else {
             action = strtok (line, " ");
             channel = strtok (NULL, " ");
-            if (action == NULL) {
+            if (action == NULL || channel == NULL) {
                 fanout_debug (3, "received garbage from client\n");
             } else {
                 if ( ! strcmp (action, "announce")) {
