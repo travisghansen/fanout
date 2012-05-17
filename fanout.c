@@ -1,6 +1,7 @@
-/* A simple server in the internet domain using TCP
-   The port number is passed as an argument 
-   https://github.com/hbons/fanout.node.js/blob/master/fanout.js*/
+/*
+   A simple server in the internet domain using TCP
+   MIT Licensed
+*/
 
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -85,27 +86,21 @@ long server_start_time;
 
 //announcement stats
 unsigned long long announcements_count =0;
-unsigned long long announcements_count_multiplier = 0;
 
 //messages stats
 unsigned long long messages_count =0;
-unsigned long long messages_count_multiplier = 0;
 
 //subscription stats
 unsigned long long subscriptions_count =0;
-unsigned long long subscriptions_count_multiplier = 0;
 
 //unsubscription stats
 unsigned long long unsubscriptions_count =0;
-unsigned long long unsubscriptions_count_multiplier = 0;
 
 //ping stats
 unsigned long long pings_count =0;
-unsigned long long pings_count_multiplier = 0;
 
 //connection/client stats
 unsigned long long clients_count =0;
-unsigned long long clients_count_multiplier = 0;
 
 static int daemonize = 0;
 
@@ -322,7 +317,7 @@ int main (int argc, char *argv[])
 
             //stats
             if (clients_count == ULLONG_MAX) {
-                clients_count_multiplier++;
+                fanout_debug (1, "wow, you've accepted alot of connections..resetting counter\n");
                 clients_count = 0;
             }
             clients_count++;
@@ -546,7 +541,7 @@ struct client *get_client (int fd)
             return client_i;
         client_i = client_i->next;
     }
-    fanout_error ("client does not exist");
+    return NULL;
 }
 
 
@@ -633,7 +628,7 @@ void client_process_input_buffer (struct client *c)
             free (message);
             message = NULL;
             if (pings_count == ULLONG_MAX) {
-                pings_count_multiplier++;
+                fanout_debug (1, "wow, you've pinged alot..resetting counter\n");
                 pings_count = 0;
             }
             pings_count++;
@@ -659,6 +654,8 @@ void client_process_input_buffer (struct client *c)
             //uptime
             long uptime = (long)time (NULL) - server_start_time;
 
+            //averages
+
             asprintf (&message,
 "uptime: %ldd %ldh %ldm %lds\n\
 max connections: %d\n\
@@ -666,27 +663,20 @@ current connections: %d\n\
 current channels: %d\n\
 current subscriptions: %d\n\
 user-requested subscriptions: %d\n\
-total connections: %llu + (%llu * %llu)\n\
-total announcements: %llu + (%llu * %llu)\n\
-total messages: %llu + (%llu * %llu)\n\
-total subscribes: %llu + (%llu * %llu)\n\
-total unsubscribes: %llu + (%llu * %llu)\n\
-total pings: %llu + (%llu * %llu)\
+total connections: %llu\n\
+total announcements: %llu\n\
+total messages: %llu\n\
+total subscribes: %llu\n\
+total unsubscribes: %llu\n\
+total pings: %llu\
 \n",                   uptime/3600/24, uptime/3600%24,
                        uptime/60%60, uptime%60,
                        max_connection_count,
                        current_client_count, current_channel_count,
                        current_subscription_count,
                        current_requested_subscriptions, clients_count,
-                       ULLONG_MAX, clients_count_multiplier,
-                       announcements_count, ULLONG_MAX,
-                       announcements_count_multiplier,
-                       messages_count, ULLONG_MAX, messages_count_multiplier,
-                       subscriptions_count, ULLONG_MAX,
-                       subscriptions_count_multiplier,
-                       unsubscriptions_count, ULLONG_MAX,
-                       unsubscriptions_count_multiplier, pings_count,
-                       ULLONG_MAX, pings_count_multiplier);
+                       announcements_count, messages_count, subscriptions_count,
+                       unsubscriptions_count, pings_count);
             client_write (c, message);
             free (message);
             message = NULL;
@@ -750,6 +740,7 @@ struct subscription *get_subscription (struct client *c,
             return subscription_i;
         subscription_i = subscription_i->next;
     }
+    return NULL;
 }
 
 
@@ -803,7 +794,7 @@ void announce (const char *channel, const char *message)
             client_write (subscription_i->client, s);
             //message stats
             if (messages_count == ULLONG_MAX) {
-                messages_count_multiplier++;
+                fanout_debug (1, "wow, you've sent a lot of messages..resetting counter\n");
                 messages_count = 0;
             }
             messages_count++;
@@ -812,7 +803,7 @@ void announce (const char *channel, const char *message)
     }
     fanout_debug (2, "announced messge %s", s);
     if (announcements_count == ULLONG_MAX) {
-        announcements_count_multiplier++;
+        fanout_debug (1, "wow, you've announced alot..resetting counter\n");
         announcements_count = 0;
     }
     announcements_count++;
@@ -843,7 +834,7 @@ void subscribe (struct client *c, const char *channel_name)
                    subscription_i->channel->name);
 
     if (subscriptions_count == ULLONG_MAX) {
-        subscriptions_count_multiplier++;
+        fanout_debug (1, "wow, you've subscribed alot..resetting counter\n");
         subscriptions_count = 0;
     }
     subscriptions_count++;
@@ -873,7 +864,7 @@ void unsubscribe (struct client *c, const char *channel_name)
             channel->subscription_count--;
 
             if (unsubscriptions_count == ULLONG_MAX) {
-                unsubscriptions_count_multiplier++;
+                fanout_debug (1, "wow, you've unsubscribed alot..resetting counter\n");
                 unsubscriptions_count = 0;
             }
             unsubscriptions_count++;
