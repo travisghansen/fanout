@@ -14,7 +14,7 @@
 #include <time.h>
 #include <getopt.h>
 #include <stdarg.h>
-
+#include <limits.h>
 
 struct client
 {
@@ -81,6 +81,32 @@ void unsubscribe (struct client *c, const char *channel_name);
 // GLOBAL VARS
 fd_set readset, tempset;
 u_int max;
+long server_start_time;
+
+//announcement stats
+unsigned long long announcements_count =0;
+unsigned long long announcements_count_multiplier = 0;
+
+//messages stats
+unsigned long long messages_count =0;
+unsigned long long messages_count_multiplier = 0;
+
+//subscription stats
+unsigned long long subscriptions_count =0;
+unsigned long long subscriptions_count_multiplier = 0;
+
+//unsubscription stats
+unsigned long long unsubscriptions_count =0;
+unsigned long long unsubscriptions_count_multiplier = 0;
+
+//ping stats
+unsigned long long pings_count =0;
+unsigned long long pings_count_multiplier = 0;
+
+//connection/client stats
+unsigned long long clients_count =0;
+unsigned long long clients_count_multiplier = 0;
+
 static int daemonize = 0;
 
 FILE *logfile;
@@ -103,6 +129,7 @@ int main (int argc, char *argv[])
     u_int yes = 1;
     u_int listen_backlog = 25;
     FILE *pidfile;
+    server_start_time = (long)time (NULL);
     char buffer[1025];
 
     struct client *client_i = NULL;
@@ -292,6 +319,13 @@ int main (int argc, char *argv[])
             fanout_debug (2, "client socket connected\n");
             client_write (client_i, "debug!connected...\n");
             subscribe (client_i, "all");
+
+            //stats
+            if (clients_count == ULLONG_MAX) {
+                clients_count_multiplier++;
+                clients_count = 0;
+            }
+            clients_count++;
        }
 
         // Process events of other sockets...
@@ -598,7 +632,12 @@ void client_process_input_buffer (struct client *c)
             client_write (c, message);
             free (message);
             message = NULL;
-        } else if ( ! strcmp (line, "stats")) {
+            if (pings_count == ULLONG_MAX) {
+                pings_count_multiplier++;
+                pings_count = 0;
+            }
+            pings_count++;
+        } else if ( ! strcmp (line, "info")) {
             //max connections
             u_int max_connection_count = max;
             if (daemonize) {
@@ -615,13 +654,39 @@ void client_process_input_buffer (struct client *c)
 
             //subscriptions
             u_int current_subscription_count = subscription_count ();
-            //client
-            //messages
+            u_int current_requested_subscriptions = (current_subscription_count
+                                                      - current_client_count);
+            //uptime
+            long uptime = (long)time (NULL) - server_start_time;
 
-            asprintf (&message, "max connections: %d\ncurrent connections: %d\n\
-current channels: %d\ncurrent subscriptions: %d\n", max_connection_count,
+            asprintf (&message,
+"uptime: %ldd %ldh %ldm %lds\n\
+max connections: %d\n\
+current connections: %d\n\
+current channels: %d\n\
+current subscriptions: %d\n\
+user-requested subscriptions: %d\n\
+total connections: %llu + (%llu * %llu)\n\
+total announcements: %llu + (%llu * %llu)\n\
+total messages: %llu + (%llu * %llu)\n\
+total subscribes: %llu + (%llu * %llu)\n\
+total unsubscribes: %llu + (%llu * %llu)\n\
+total pings: %llu + (%llu * %llu)\
+\n",                   uptime/3600/24, uptime/3600%24,
+                       uptime/60%60, uptime%60,
+                       max_connection_count,
                        current_client_count, current_channel_count,
-                       current_subscription_count);
+                       current_subscription_count,
+                       current_requested_subscriptions, clients_count,
+                       ULLONG_MAX, clients_count_multiplier,
+                       announcements_count, ULLONG_MAX,
+                       announcements_count_multiplier,
+                       messages_count, ULLONG_MAX, messages_count_multiplier,
+                       subscriptions_count, ULLONG_MAX,
+                       subscriptions_count_multiplier,
+                       unsubscriptions_count, ULLONG_MAX,
+                       unsubscriptions_count_multiplier, pings_count,
+                       ULLONG_MAX, pings_count_multiplier);
             client_write (c, message);
             free (message);
             message = NULL;
@@ -736,10 +801,21 @@ void announce (const char *channel, const char *message)
             fanout_debug (3, "announcing message %s to %d on channel %s\n",
                            message, subscription_i->client->fd, channel);
             client_write (subscription_i->client, s);
+            //message stats
+            if (messages_count == ULLONG_MAX) {
+                messages_count_multiplier++;
+                messages_count = 0;
+            }
+            messages_count++;
         }
         subscription_i = subscription_i->next;
     }
     fanout_debug (2, "announced messge %s", s);
+    if (announcements_count == ULLONG_MAX) {
+        announcements_count_multiplier++;
+        announcements_count = 0;
+    }
+    announcements_count++;
     free (s);
 }
 
@@ -766,6 +842,12 @@ void subscribe (struct client *c, const char *channel_name)
     fanout_debug (2, "subscribed client %d to channel %s\n", c->fd,
                    subscription_i->channel->name);
 
+    if (subscriptions_count == ULLONG_MAX) {
+        subscriptions_count_multiplier++;
+        subscriptions_count = 0;
+    }
+    subscriptions_count++;
+
     subscription_i->next = subscription_head;
     if (subscription_head != NULL)
         subscription_head->previous = subscription_i;
@@ -789,6 +871,12 @@ void unsubscribe (struct client *c, const char *channel_name)
                            channel_name);
 
             channel->subscription_count--;
+
+            if (unsubscriptions_count == ULLONG_MAX) {
+                unsubscriptions_count_multiplier++;
+                unsubscriptions_count = 0;
+            }
+            unsubscriptions_count++;
 
             if ( ! channel_has_subscription (channel)) {
                 remove_channel (channel);
