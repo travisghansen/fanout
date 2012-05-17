@@ -1,2 +1,1 @@
- * parse options
- * add option for port, max message size
+ * add option for max message size

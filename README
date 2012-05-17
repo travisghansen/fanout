@@ -3,6 +3,8 @@ receiving messages on different channels.
 
 Protocol:
 
+ping - replies with current timestamp on the server
+stats - replies with some basic info about the server
 subcribe <channel>
 unsubscribe <channel>
 announce <channel> <message>
