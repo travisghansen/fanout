@@ -276,12 +276,12 @@ int main (int argc, char *argv[])
         exit (EXIT_FAILURE);
     }
 
-    getrlimit (RLIMIT_NOFILE,&s_rlimit);
 
+    getrlimit (RLIMIT_NOFILE,&s_rlimit);
 /*
-    i_rlimit.rlim_cur = 5; //rlim_cur is larger than rlim_max .EINVAL error
+    i_rlimit.rlim_cur = 4; //rlim_cur is larger than rlim_max .EINVAL error
     i_rlimit.rlim_max = 512;
-    if(setrlimit (RLIMIT_NOFILE,&r_limit) == -1)
+    if(setrlimit (RLIMIT_NOFILE,&i_rlimit) == -1)
         fanout_error ("ERROR setting rlimit");
 */
 
@@ -294,7 +294,7 @@ int main (int argc, char *argv[])
         client_limit--;
     }
 
-    fanout_debug (3, "max client connections: %d\n", client_limit);
+    fanout_debug (2, "max client connections: %d\n", client_limit);
 
     while (1) {
         fanout_debug (3, "server waiting for new activity\n");
@@ -302,8 +302,6 @@ int main (int argc, char *argv[])
         tempset = readset;
         // Wait indefinitely for read events
         res = select (max+1, &tempset, NULL, NULL, NULL);
-
-        fanout_debug (1, "res: %d\n", res);
 
         if (res < 0) {
             fanout_debug (1, "something bad happened\n");
