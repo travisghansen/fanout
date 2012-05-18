@@ -118,6 +118,7 @@ struct client *client_head = NULL;
 struct subscription *subscription_head = NULL;
 struct channel *channel_head = NULL;
 
+struct rlimit s_rlimit;
 
 
 int main (int argc, char *argv[])
@@ -135,7 +136,6 @@ int main (int argc, char *argv[])
 
     socklen_t clilen;
     struct sockaddr_in serv_addr, cli_addr;
-    struct rlimit s_rlimit;
 
     static struct option long_options[] = {
         {"port", 1, 0, 0},
@@ -311,6 +311,7 @@ fs.file-max=100000\n");
 
     fanout_debug (1, "rlimit set at: Soft=%d Hard=%d\n", s_rlimit.rlim_cur, s_rlimit.rlim_max);
     fanout_debug (2, "max client connections: %d\n", client_limit);
+    fanout_debug (2, "FD_SETSIZE: %d\n", FD_SETSIZE);
 
     while (1) {
         fanout_debug (3, "server waiting for new activity\n");
@@ -341,6 +342,7 @@ fs.file-max=100000\n");
             if ((client_i->fd = accept (srvsock, (struct sockaddr *)&cli_addr,
                                     &clilen)) == -1) {
                 fanout_debug (0, "%s\n", strerror (errno));
+                free (client_i);
                 fanout_error ("failed on accept ()");
                 continue;
             }
@@ -350,6 +352,7 @@ fs.file-max=100000\n");
                 send (client_i->fd, "too many connections\n",
                        strlen ("too many connections\n"), 0);
                 close (client_i->fd);
+                free (client_i);
                 continue;
             }
 
@@ -715,6 +718,8 @@ resetting counter\n");
 
             asprintf (&message,
 "uptime: %ldd %ldh %ldm %lds\n\
+client-limit: %d\n\
+rlimits: Soft=%d Hard=%d\n\
 max connections: %d\n\
 current connections: %d\n\
 current channels: %d\n\
@@ -728,6 +733,9 @@ total unsubscribes: %llu\n\
 total pings: %llu\
 \n",                   uptime/3600/24, uptime/3600%24,
                        uptime/60%60, uptime%60,
+                       client_limit,
+                       (int) s_rlimit.rlim_cur,
+                       (int)s_rlimit.rlim_max,
                        max_connection_count,
                        current_client_count, current_channel_count,
                        current_subscription_count,
