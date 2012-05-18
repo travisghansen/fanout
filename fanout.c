@@ -84,28 +84,28 @@ void unsubscribe (struct client *c, const char *channel_name);
 // GLOBAL VARS
 fd_set readset, tempset;
 u_int max;
-u_int client_limit;
+int client_limit = -1;
 long server_start_time;
 
 //announcement stats
-unsigned long long announcements_count =0;
+unsigned long long announcements_count = 0;
 
 //messages stats
-unsigned long long messages_count =0;
+unsigned long long messages_count = 0;
 
 //subscription stats
-unsigned long long subscriptions_count =0;
+unsigned long long subscriptions_count = 0;
 
 //unsubscription stats
-unsigned long long unsubscriptions_count =0;
+unsigned long long unsubscriptions_count = 0;
 
 //ping stats
-unsigned long long pings_count =0;
+unsigned long long pings_count = 0;
 
 //connection/client stats
-unsigned long long clients_count =0;
+unsigned long long clients_count = 0;
 
-static int daemonize = 0;
+static int daemonize =  0;
 
 FILE *logfile;
 
@@ -135,7 +135,7 @@ int main (int argc, char *argv[])
 
     socklen_t clilen;
     struct sockaddr_in serv_addr, cli_addr;
-    struct rlimit i_rlimit, s_rlimit;
+    struct rlimit s_rlimit;
 
     static struct option long_options[] = {
         {"port", 1, 0, 0},
@@ -144,6 +144,7 @@ int main (int argc, char *argv[])
         {"pidfile", 1, 0, 0},
         {"debug-level", 1, 0, 0},
         {"help", 0, 0, 0},
+        {"client-limit", 1, 0, 0},
         {NULL, 0, NULL, 0}
     };
 
@@ -174,13 +175,23 @@ int main (int argc, char *argv[])
                     case 4:
                         debug_level = atoi (optarg);
                         break;
+                    //help
                     case 5:
                         printf("Usage: fanout [options...]\n");
                         printf("pubsub style fanout server\n\n");
                         printf("Recognized options are:\n");
                         printf("  --port=PORT           port to run the service\
  on\n");
+                        printf("                        1986 (default)\n");
                         printf("  --daemon              fork to background\n");
+                        printf("  --client-limit=LIMIT  max connections\n");
+                        printf("                        BEWARE ulimit \
+restrictions\n");
+                        printf("                        you may adjust it using\
+ ulimit -n X\n");
+                        printf("                        or sysctl -w \
+fs.file-max=100000\n");
+
                         printf("  --logfile=PATH        path to log file\n");
                         printf("  --pidfile=PATH        path to pid file\n");
                         printf("  --debug-level=LEVEL   verbosity level\n");
@@ -192,6 +203,16 @@ int main (int argc, char *argv[])
 \n");
                         exit (EXIT_SUCCESS);
                         break;
+                    //client-limit
+                    case 6:
+                        client_limit = atoi (optarg);
+
+                        if (client_limit < 1) {
+                            printf ("invalid client limit: %d\n", client_limit);
+                            exit (EXIT_FAILURE);
+                        }
+                        break;
+
                 }
                 break;
             default:
@@ -278,22 +299,17 @@ int main (int argc, char *argv[])
 
 
     getrlimit (RLIMIT_NOFILE,&s_rlimit);
-/*
+
+    /*
+    //for testing purposes only
+    struct rlimti i_rlimit;
     i_rlimit.rlim_cur = 4; //rlim_cur is larger than rlim_max .EINVAL error
     i_rlimit.rlim_max = 512;
     if(setrlimit (RLIMIT_NOFILE,&i_rlimit) == -1)
         fanout_error ("ERROR setting rlimit");
-*/
+    */
 
-    client_limit = s_rlimit.rlim_max;
-    if ( ! daemonize) {
-        client_limit -= 3;
-    }
-
-    if (logfile != NULL) {
-        client_limit--;
-    }
-
+    fanout_debug (1, "rlimit set at: Soft=%d Hard=%d\n", s_rlimit.rlim_cur, s_rlimit.rlim_max);
     fanout_debug (2, "max client connections: %d\n", client_limit);
 
     while (1) {
@@ -304,7 +320,8 @@ int main (int argc, char *argv[])
         res = select (max+1, &tempset, NULL, NULL, NULL);
 
         if (res < 0) {
-            fanout_debug (1, "something bad happened\n");
+            fanout_debug (0, "select failed %s\n", strerror (errno));
+            fanout_error ("res was < 0");
             continue;
         }
 
@@ -324,10 +341,11 @@ int main (int argc, char *argv[])
             if ((client_i->fd = accept (srvsock, (struct sockaddr *)&cli_addr,
                                     &clilen)) == -1) {
                 fanout_debug (0, "%s\n", strerror (errno));
+                fanout_error ("failed on accept ()");
                 continue;
             }
 
-            if (client_count () >= client_limit) {
+            if (client_limit && client_count () >= client_limit) {
                 fanout_debug (1, "hit connection limit of: %d\n", client_limit);
                 send (client_i->fd, "too many connections\n",
                        strlen ("too many connections\n"), 0);
