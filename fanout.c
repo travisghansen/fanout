@@ -16,6 +16,8 @@
 #include <getopt.h>
 #include <stdarg.h>
 #include <limits.h>
+#include <sys/resource.h>
+#include <errno.h>
 
 struct client
 {
@@ -82,6 +84,7 @@ void unsubscribe (struct client *c, const char *channel_name);
 // GLOBAL VARS
 fd_set readset, tempset;
 u_int max;
+u_int client_limit;
 long server_start_time;
 
 //announcement stats
@@ -132,6 +135,7 @@ int main (int argc, char *argv[])
 
     socklen_t clilen;
     struct sockaddr_in serv_addr, cli_addr;
+    struct rlimit i_rlimit, s_rlimit;
 
     static struct option long_options[] = {
         {"port", 1, 0, 0},
@@ -261,9 +265,9 @@ int main (int argc, char *argv[])
         }
 
         /* Close out the standard file descriptors */
-        close(STDIN_FILENO);
-        close(STDOUT_FILENO);
-        close(STDERR_FILENO);
+        close (STDIN_FILENO);
+        close (STDOUT_FILENO);
+        close (STDERR_FILENO);
     }
 
     /* Change the current working directory */
@@ -272,12 +276,34 @@ int main (int argc, char *argv[])
         exit (EXIT_FAILURE);
     }
 
+    getrlimit (RLIMIT_NOFILE,&s_rlimit);
+
+/*
+    i_rlimit.rlim_cur = 5; //rlim_cur is larger than rlim_max .EINVAL error
+    i_rlimit.rlim_max = 512;
+    if(setrlimit (RLIMIT_NOFILE,&r_limit) == -1)
+        fanout_error ("ERROR setting rlimit");
+*/
+
+    client_limit = s_rlimit.rlim_max;
+    if ( ! daemonize) {
+        client_limit -= 3;
+    }
+
+    if (logfile != NULL) {
+        client_limit--;
+    }
+
+    fanout_debug (3, "max client connections: %d\n", client_limit);
+
     while (1) {
         fanout_debug (3, "server waiting for new activity\n");
 
         tempset = readset;
-        // Wait indefinitely for read events 
+        // Wait indefinitely for read events
         res = select (max+1, &tempset, NULL, NULL, NULL);
+
+        fanout_debug (1, "res: %d\n", res);
 
         if (res < 0) {
             fanout_debug (1, "something bad happened\n");
@@ -296,6 +322,23 @@ int main (int argc, char *argv[])
                 continue;
             }
 
+            clilen = sizeof (cli_addr);
+            if ((client_i->fd = accept (srvsock, (struct sockaddr *)&cli_addr,
+                                    &clilen)) == -1) {
+                fanout_debug (0, "%s\n", strerror (errno));
+                continue;
+            }
+
+            if (client_count () >= client_limit) {
+                fanout_debug (1, "hit connection limit of: %d\n", client_limit);
+                send (client_i->fd, "too many connections\n",
+                       strlen ("too many connections\n"), 0);
+                close (client_i->fd);
+                continue;
+            }
+
+            FD_SET (client_i->fd, &readset);
+
             //Shove current new connection in the front of the line
             client_i->next = client_head;
             if (client_head != NULL) {
@@ -303,10 +346,6 @@ int main (int argc, char *argv[])
             }
             client_head = client_i;
 
-            clilen = sizeof (cli_addr);
-            client_i->fd = accept (srvsock, (struct sockaddr *)&cli_addr,
-                                    &clilen);
-            FD_SET (client_i->fd, &readset);
             if (client_i->fd > max) {
                 max = client_i->fd;
             }
@@ -317,7 +356,8 @@ int main (int argc, char *argv[])
 
             //stats
             if (clients_count == ULLONG_MAX) {
-                fanout_debug (1, "wow, you've accepted alot of connections..resetting counter\n");
+                fanout_debug (1, "wow, you've accepted alot of connections..\
+resetting counter\n");
                 clients_count = 0;
             }
             clients_count++;
@@ -352,7 +392,7 @@ int main (int argc, char *argv[])
         }
     }
 
-    close(srvsock);
+    close (srvsock);
     return 0; 
 }
 
@@ -628,7 +668,8 @@ void client_process_input_buffer (struct client *c)
             free (message);
             message = NULL;
             if (pings_count == ULLONG_MAX) {
-                fanout_debug (1, "wow, you've pinged alot..resetting counter\n");
+                fanout_debug (1, "wow, you've pinged alot..\
+resetting counter\n");
                 pings_count = 0;
             }
             pings_count++;
@@ -794,7 +835,8 @@ void announce (const char *channel, const char *message)
             client_write (subscription_i->client, s);
             //message stats
             if (messages_count == ULLONG_MAX) {
-                fanout_debug (1, "wow, you've sent a lot of messages..resetting counter\n");
+                fanout_debug (1, "wow, you've sent a lot of messages..\
+resetting counter\n");
                 messages_count = 0;
             }
             messages_count++;
@@ -864,7 +906,8 @@ void unsubscribe (struct client *c, const char *channel_name)
             channel->subscription_count--;
 
             if (unsubscriptions_count == ULLONG_MAX) {
-                fanout_debug (1, "wow, you've unsubscribed alot..resetting counter\n");
+                fanout_debug (1, "wow, you've unsubscribed alot..\
+resetting counter\n");
                 unsubscriptions_count = 0;
             }
             unsubscriptions_count++;
