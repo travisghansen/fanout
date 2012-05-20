@@ -105,6 +105,9 @@ unsigned long long pings_count = 0;
 //connection/client stats
 unsigned long long clients_count = 0;
 
+//over limit count
+unsigned long long client_limit_count = 0;
+
 static int daemonize =  0;
 
 FILE *logfile;
@@ -349,10 +352,16 @@ fs.file-max=100000\n");
 
             if (client_limit && client_count () >= client_limit) {
                 fanout_debug (1, "hit connection limit of: %d\n", client_limit);
-                send (client_i->fd, "too many connections\n",
-                       strlen ("too many connections\n"), 0);
+                send (client_i->fd, "debug!busy\n",
+                       strlen ("debug!busy\n"), 0);
                 close (client_i->fd);
                 free (client_i);
+                if (client_limit_count == ULLONG_MAX) {
+                    fanout_debug (1, "wow, you've limited alot..\
+resetting counter\n");
+                    client_limit_count = 0;
+                }
+                client_limit_count++;
                 continue;
             }
 
@@ -719,6 +728,7 @@ resetting counter\n");
             asprintf (&message,
 "uptime: %ldd %ldh %ldm %lds\n\
 client-limit: %d\n\
+limit rejected connections: %llu\n\
 rlimits: Soft=%d Hard=%d\n\
 max connections: %d\n\
 current connections: %d\n\
@@ -734,6 +744,7 @@ total pings: %llu\
 \n",                   uptime/3600/24, uptime/3600%24,
                        uptime/60%60, uptime%60,
                        client_limit,
+                       client_limit_count,
                        (int) s_rlimit.rlim_cur,
                        (int)s_rlimit.rlim_max,
                        max_connection_count,
