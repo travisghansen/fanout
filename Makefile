@@ -1,3 +1,4 @@
+PROJ = fanout
 OBJS = 
 CC = gcc
 DEBUG = -g
@@ -7,7 +8,7 @@ LFLAGS = -Wall $(DEBUG)
 .PHONY : $(OBJS)
 
 fanout :
-	$(CC) $(LFLAGS) $(OBJS) -o fanout fanout.c
+	$(CC) $(LFLAGS) $(OBJS) -o $(PROJ) fanout.c
 
 clean:
 	\rm  fanout

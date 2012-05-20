@@ -20,6 +20,7 @@
 #include <errno.h>
 #include <sys/epoll.h>
 
+
 struct client
 {
     int fd;
@@ -599,7 +600,7 @@ struct channel *get_channel (const char *channel_name)
         channel_i = channel_i->next;
     }
 
-    fanout_debug (2, "creating new channel\n");
+    fanout_debug (2, "creating new channel %s\n", channel_name);
     if ((channel_i = calloc (1, sizeof (struct channel))) == NULL) {
         fanout_error ("memory error");
     }
@@ -615,7 +616,7 @@ struct channel *get_channel (const char *channel_name)
 
 void remove_channel (struct channel *c)
 {
-    fanout_debug (3, "removing unused channel %s\n", c->name);
+    fanout_debug (2, "removing unused channel %s\n", c->name);
     if (c->next != NULL) {
         c->next->previous = c->previous;
     }
