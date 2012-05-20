@@ -18,6 +18,7 @@
 #include <limits.h>
 #include <sys/resource.h>
 #include <errno.h>
+#include <sys/epoll.h>
 
 struct client
 {
@@ -82,8 +83,9 @@ void unsubscribe (struct client *c, const char *channel_name);
 
 
 // GLOBAL VARS
-fd_set readset, tempset;
-u_int max;
+u_int max_client_count = 0;
+u_int base_fds = 0;
+u_int fd_limit = 0;
 int client_limit = -1;
 long server_start_time;
 
@@ -126,13 +128,16 @@ struct rlimit s_rlimit;
 
 int main (int argc, char *argv[])
 {
-    int srvsock, res;
+    int srvsock, epollfd, nfds, efd, n, res;
     int portno = 1986;
     u_int yes = 1;
     u_int listen_backlog = 25;
+    u_int max_events = 25;
     FILE *pidfile;
     server_start_time = (long)time (NULL);
     char buffer[1025];
+
+    struct epoll_event ev, events[max_events];
 
     struct client *client_i = NULL;
     struct client *client_tmp = NULL;
@@ -255,9 +260,16 @@ fs.file-max=100000\n");
     if (listen (srvsock, listen_backlog) == -1)
         fanout_error ("ERROR listening on server socket");
 
-    max = srvsock;
+    if((epollfd = epoll_create (10)) < 0)
+        fanout_error ("ERROR creating epoll instance");
 
-    FD_SET (srvsock, &readset);
+    ev.events = EPOLLIN;
+    ev.data.fd = srvsock;
+
+    if (epoll_ctl (epollfd, EPOLL_CTL_ADD, srvsock, &ev) == -1) {
+        fanout_error ("epoll_ctl: srvsock");
+    }
+
 
     if (daemonize) {
         pid_t pid, sid;
@@ -303,122 +315,159 @@ fs.file-max=100000\n");
 
     getrlimit (RLIMIT_NOFILE,&s_rlimit);
 
-    /*
-    //for testing purposes only
-    struct rlimti i_rlimit;
-    i_rlimit.rlim_cur = 4; //rlim_cur is larger than rlim_max .EINVAL error
-    i_rlimit.rlim_max = 512;
-    if(setrlimit (RLIMIT_NOFILE,&i_rlimit) == -1)
-        fanout_error ("ERROR setting rlimit");
-    */
+    // epollfd, srvsock, extra for reporting busy
+    base_fds = 3;
 
+    //stdin/out/err
+    if ( ! daemonize) {
+        base_fds += 3;
+    }
+
+    if (logfile) {
+        base_fds++;
+    }
+
+    fd_limit = s_rlimit.rlim_cur;
+
+    if (fd_limit <= base_fds) {
+        fanout_debug (0, "not enough file descriptors\n");
+        exit (EXIT_FAILURE);
+    }
+
+    int calculated_client_limit = fd_limit - base_fds;
+
+    //user defined
+    if (client_limit > 0) {
+        //cope with limit greater than calculated limit
+        if (client_limit > calculated_client_limit) {
+            struct rlimit i_rlimit;
+            i_rlimit.rlim_cur = client_limit + base_fds;
+            i_rlimit.rlim_max = client_limit + base_fds;
+            fanout_debug (1, "attempting to set rlimit\n");
+            if(setrlimit (RLIMIT_NOFILE,&i_rlimit) == -1)
+                fanout_error ("ERROR setting rlimit");
+
+            getrlimit (RLIMIT_NOFILE,&s_rlimit);
+        }
+    } else {
+        client_limit = calculated_client_limit;
+    }
+    
     fanout_debug (1, "rlimit set at: Soft=%d Hard=%d\n", s_rlimit.rlim_cur, s_rlimit.rlim_max);
+    fanout_debug (2, "base fds: %d\n", base_fds);
     fanout_debug (2, "max client connections: %d\n", client_limit);
-    fanout_debug (2, "FD_SETSIZE: %d\n", FD_SETSIZE);
 
     while (1) {
         fanout_debug (3, "server waiting for new activity\n");
 
-        tempset = readset;
-        // Wait indefinitely for read events
-        res = select (max+1, &tempset, NULL, NULL, NULL);
+        if ((nfds = epoll_wait (epollfd, events, max_events, -1)) == -1)
+            fanout_error ("epoll_wait");
 
-        if (res < 0) {
-            fanout_debug (0, "select failed %s\n", strerror (errno));
-            fanout_error ("res was < 0");
+        if (nfds == 0) {
             continue;
         }
 
-        if (res == 0) {
-            fanout_debug (1, "timeout is met, in our case never\n");
-            continue;
-        }
+        for (n = 0; n < nfds; n++) {
+            // new connection
+            efd = events[n].data.fd;
+            if (efd == srvsock) {
 
-        // Process new connections first 
-        if (FD_ISSET (srvsock, &tempset)) {
-            if ((client_i = calloc (1, sizeof (struct client))) == NULL) {
-                fanout_debug (0, "memory error\n");
-                continue;
-            }
-
-            clilen = sizeof (cli_addr);
-            if ((client_i->fd = accept (srvsock, (struct sockaddr *)&cli_addr,
-                                    &clilen)) == -1) {
-                fanout_debug (0, "%s\n", strerror (errno));
-                free (client_i);
-                fanout_error ("failed on accept ()");
-                continue;
-            }
-
-            if (client_limit && client_count () >= client_limit) {
-                fanout_debug (1, "hit connection limit of: %d\n", client_limit);
-                send (client_i->fd, "debug!busy\n",
-                       strlen ("debug!busy\n"), 0);
-                close (client_i->fd);
-                free (client_i);
-                if (client_limit_count == ULLONG_MAX) {
-                    fanout_debug (1, "wow, you've limited alot..\
-resetting counter\n");
-                    client_limit_count = 0;
-                }
-                client_limit_count++;
-                continue;
-            }
-
-            FD_SET (client_i->fd, &readset);
-
-            //Shove current new connection in the front of the line
-            client_i->next = client_head;
-            if (client_head != NULL) {
-                client_head->previous = client_i;
-            }
-            client_head = client_i;
-
-            if (client_i->fd > max) {
-                max = client_i->fd;
-            }
-
-            fanout_debug (2, "client socket connected\n");
-            client_write (client_i, "debug!connected...\n");
-            subscribe (client_i, "all");
-
-            //stats
-            if (clients_count == ULLONG_MAX) {
-                fanout_debug (1, "wow, you've accepted alot of connections..\
-resetting counter\n");
-                clients_count = 0;
-            }
-            clients_count++;
-       }
-
-        // Process events of other sockets...
-        client_i = client_head;
-        while (client_i != NULL) {
-            if (FD_ISSET (client_i->fd, &tempset)) {
-                // Process data from socket i
-                fanout_debug (3, "processing client %d\n", client_i->fd);
-                memset (buffer, 0, sizeof (buffer));
-                res = recv (client_i->fd, buffer, 1024, 0);
-                if (res <= 0) {
-                    fanout_debug (2, "client socket disconnected\n");
-
-                    client_tmp = client_i;
-                    client_i = client_i->next;
-
-                    shutdown_client (client_tmp);
+                if ((client_i = calloc (1, sizeof (struct client))) == NULL) {
+                    fanout_debug (0, "memory error\n");
                     continue;
-                } else {
-                    // Process data in buffer
-                    fanout_debug (3, "%d bytes read: [%.*s]\n", res, (res - 1),
-                                   buffer);
-                    client_i->input_buffer = str_append (
-                                                client_i->input_buffer, buffer);
-                    client_process_input_buffer (client_i);
                 }
-            }
-            client_i = client_i->next;
-        }
-    }
+
+                clilen = sizeof (cli_addr);
+                if ((client_i->fd = accept (srvsock, (struct sockaddr *)&cli_addr,
+                                        &clilen)) == -1) {
+                    fanout_debug (0, "%s\n", strerror (errno));
+                    free (client_i);
+                    fanout_error ("failed on accept ()");
+                    continue;
+                }
+
+                int current_count = client_count ();
+
+                if (client_limit > 0 && current_count >= client_limit) {
+                    fanout_debug (1, "hit connection limit of: %d\n", client_limit);
+                    send (client_i->fd, "debug!busy\n",
+                           strlen ("debug!busy\n"), 0);
+                    close (client_i->fd);
+                    free (client_i);
+                    if (client_limit_count == ULLONG_MAX) {
+                        fanout_debug (1, "wow, you've limited alot..\
+resetting counter\n");
+                        client_limit_count = 0;
+                    }
+                    client_limit_count++;
+                    continue;
+                }
+
+                //add new socket to watch list
+                ev.events = EPOLLIN;
+                ev.data.fd = client_i->fd;
+                if (epoll_ctl (epollfd, EPOLL_CTL_ADD, client_i->fd, &ev) == -1) {
+                    fanout_error ("epoll_ctl: srvsock");
+                }
+
+                //Shove current new connection in the front of the line
+                client_i->next = client_head;
+                if (client_head != NULL) {
+                    client_head->previous = client_i;
+                }
+                client_head = client_i;
+
+                current_count ++;
+                if (current_count > max_client_count) {
+                    max_client_count = current_count;
+                }
+
+                fanout_debug (2, "client socket connected\n");
+                client_write (client_i, "debug!connected...\n");
+                subscribe (client_i, "all");
+
+                //stats
+                if (clients_count == ULLONG_MAX) {
+                    fanout_debug (1, "wow, you've accepted alot of connections..\
+    resetting counter\n");
+                    clients_count = 0;
+                }
+                clients_count++;
+            } else {
+                // Process events of other sockets...
+                client_i = client_head;
+                while (client_i != NULL) {
+                    if (efd == client_i->fd) {
+                        // Process data from socket i
+                        fanout_debug (3, "processing client %d\n", client_i->fd);
+                        memset (buffer, 0, sizeof (buffer));
+                        res = recv (client_i->fd, buffer, 1024, 0);
+                        if (res <= 0) {
+                            fanout_debug (2, "client socket disconnected\n");
+
+                            client_tmp = client_i;
+                            client_i = client_i->next;
+
+                            //del socket from watch list
+                            if (epoll_ctl (epollfd, EPOLL_CTL_DEL, client_tmp->fd, &ev) == -1) {
+                                fanout_error ("epoll_ctl: srvsock");
+                            }
+                            shutdown_client (client_tmp);
+                            continue;
+                        } else {
+                            // Process data in buffer
+                            fanout_debug (3, "%d bytes read: [%.*s]\n", res, (res - 1),
+                                           buffer);
+                            client_i->input_buffer = str_append (
+                                                        client_i->input_buffer, buffer);
+                            client_process_input_buffer (client_i);
+                        }
+                    }
+                    client_i = client_i->next;
+                }//end while (client_i != NULL)
+            }//end else
+        }//end for
+    }//end while (1)
 
     close (srvsock);
     return 0; 
@@ -641,7 +690,6 @@ void shutdown_client (struct client *c)
     }
 
     remove_client (c);
-    FD_CLR (c->fd, &readset);
     shutdown (c->fd, 2);
     close (c->fd);
     destroy_client (c);
@@ -702,13 +750,6 @@ resetting counter\n");
             }
             pings_count++;
         } else if ( ! strcmp (line, "info")) {
-            //max connections
-            u_int max_connection_count = max;
-            if (daemonize) {
-                max_connection_count++;
-            } else { 
-                max_connection_count -= 3;
-            }
 
             //current connections
             u_int current_client_count = client_count ();
@@ -747,7 +788,7 @@ total pings: %llu\
                        client_limit_count,
                        (int) s_rlimit.rlim_cur,
                        (int)s_rlimit.rlim_max,
-                       max_connection_count,
+                       max_client_count,
                        current_client_count, current_channel_count,
                        current_subscription_count,
                        current_requested_subscriptions, clients_count,
