@@ -206,9 +206,9 @@ int main (int argc, char *argv[])
                         printf("Recognized options are:\n");
                         printf("  --port=PORT           port to run the service\
  on\n");
+                        printf("                        1986 (default)\n");
                         printf("  --run-as=USER[:GROUP] drop permissions to def\
 ined levels\n");
-                        printf("                        1986 (default)\n");
                         printf("  --daemon              fork to background\n");
                         printf("  --client-limit=LIMIT  max connections\n");
                         printf("                        BEWARE ulimit \
