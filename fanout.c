@@ -8,7 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <ctype.h>
 #include <sys/types.h>
+#include <pwd.h>
+#include <grp.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <netinet/in.h>
@@ -39,6 +42,7 @@ struct channel
     u_int subscription_count;
 };
 
+
 struct subscription
 {
     struct client *client;
@@ -47,6 +51,8 @@ struct subscription
     struct subscription *previous;
 };
 
+
+int is_numeric (char *str);
 int strcpos (const char *haystack, const char c);
 char *substr (const char *s, int start, int stop);
 void str_swap_free (char **target, char *source);
@@ -138,6 +144,14 @@ int main (int argc, char *argv[])
     server_start_time = (long)time (NULL);
     char buffer[1025];
 
+    struct passwd *pwd;
+    struct group *grp;
+
+    char *user;
+    char *group;
+    uid_t user_id = -1;
+    gid_t group_id = -1;
+
     struct epoll_event ev, events[max_events];
 
     struct client *client_i = NULL;
@@ -154,6 +168,7 @@ int main (int argc, char *argv[])
         {"debug-level", 1, 0, 0},
         {"help", 0, 0, 0},
         {"client-limit", 1, 0, 0},
+        {"run-as", 1, 0, 0},
         {NULL, 0, NULL, 0}
     };
 
@@ -191,6 +206,8 @@ int main (int argc, char *argv[])
                         printf("Recognized options are:\n");
                         printf("  --port=PORT           port to run the service\
  on\n");
+                        printf("  --run-as=USER[:GROUP] drop permissions to def\
+ined levels\n");
                         printf("                        1986 (default)\n");
                         printf("  --daemon              fork to background\n");
                         printf("  --client-limit=LIMIT  max connections\n");
@@ -222,6 +239,37 @@ fs.file-max=100000\n");
                         }
                         break;
 
+                    //run-as
+                    case 7:
+                        fanout_debug (3, "requsting permissions %s\n", optarg);
+                        user = strtok (optarg, ":");
+                        group = strtok (NULL, ":");
+                        if (user != NULL) {
+                            if (is_numeric (user)) {
+                                user_id = (uid_t) atoi (user);
+                            } else {
+                                if ((pwd = getpwnam (user)) == NULL) {
+                                    fanout_error ("failed getting user_id");
+                                } else {
+                                    user_id = pwd->pw_uid;
+                                }
+                            }
+                        }
+
+                        if (group != NULL) {
+                            if (is_numeric (group)) {
+                                group_id = (gid_t) atoi (group);
+                            } else {
+                                if ((grp = getgrnam (group)) == NULL) {
+                                    fanout_error ("failed getting group_id");
+                                } else {
+                                    group_id = grp->gr_gid;
+                                }
+                            }
+                        }
+
+                        break;
+
                 }
                 break;
             default:
@@ -237,7 +285,6 @@ fs.file-max=100000\n");
         exit (EXIT_FAILURE);
     }
 
-
     if ( ! portno > 0) {
         fanout_debug (0, "ERROR invalid port\n");
         exit (EXIT_FAILURE);
@@ -246,13 +293,14 @@ fs.file-max=100000\n");
     srvsock = socket (AF_INET, SOCK_STREAM, 0);
     if (srvsock < 0)
         fanout_error ("ERROR opening socket");
-    
+
     bzero((char *) &serv_addr, sizeof (serv_addr));
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
     serv_addr.sin_port = htons (portno);
-    
+
     setsockopt (srvsock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof (yes));
+
     if (bind (srvsock, (struct sockaddr *) &serv_addr, sizeof (serv_addr)) < 0)
     {
         fanout_error ("ERROR on binding");
@@ -319,6 +367,9 @@ fs.file-max=100000\n");
     // epollfd, srvsock, extra for reporting busy
     base_fds = 3;
 
+    //additional padding for safety
+    base_fds += 10;
+
     //stdin/out/err
     if ( ! daemonize) {
         base_fds += 3;
@@ -353,8 +404,28 @@ fs.file-max=100000\n");
     } else {
         client_limit = calculated_client_limit;
     }
-    
-    fanout_debug (1, "rlimit set at: Soft=%d Hard=%d\n", s_rlimit.rlim_cur, s_rlimit.rlim_max);
+
+
+    //set group first so as to not lose root permissions for user set below
+    if ((int) group_id > -1) {
+        fanout_debug (3, "attempting to set group %s\n",
+                       getgrgid (group_id)->gr_name);
+        if (setgid (group_id) == -1) {
+            fanout_error ("failed setting group");
+        }
+    }
+
+    //set user
+    if ((int) user_id > -1) {
+        fanout_debug (3, "attempting to set user %s\n", 
+                       getpwuid (user_id)->pw_name);
+        if (setuid (user_id) == -1) {
+            fanout_error ("failed setting user");
+        }
+    }
+
+    fanout_debug (1, "rlimit set at: Soft=%d Hard=%d\n", s_rlimit.rlim_cur,
+                   s_rlimit.rlim_max);
     fanout_debug (2, "base fds: %d\n", base_fds);
     fanout_debug (2, "max client connections: %d\n", client_limit);
 
@@ -474,6 +545,16 @@ resetting counter\n");
     return 0; 
 }
 
+
+int is_numeric (char *str)
+{
+    while (*str) {
+        if (!isdigit (*str))
+            return 0;
+        str++;
+    }
+    return 1;
+}
 
 
 int strcpos (const char *haystack, const char c)
@@ -920,7 +1001,8 @@ resetting counter\n");
         }
         subscription_i = subscription_i->next;
     }
-    fanout_debug (2, "announced messge %s", s);
+    fanout_debug (2, "announced messge to %d client(s) %s",
+                   get_channel (channel)->subscription_count, s);
     if (announcements_count == ULLONG_MAX) {
         fanout_debug (1, "wow, you've announced alot..resetting counter\n");
         announcements_count = 0;
