@@ -120,6 +120,7 @@ unsigned long long client_limit_count = 0;
 static int daemonize =  0;
 
 FILE *logfile;
+long max_logfile_size = -1;
 
 // 0 = ERROR
 // 1 = WARNING
@@ -169,6 +170,7 @@ int main (int argc, char *argv[])
         {"help", 0, 0, 0},
         {"client-limit", 1, 0, 0},
         {"run-as", 1, 0, 0},
+        {"max-logfile-size", 1, 0, 0},
         {NULL, 0, NULL, 0}
     };
 
@@ -204,28 +206,30 @@ int main (int argc, char *argv[])
                         printf("Usage: fanout [options...]\n");
                         printf("pubsub style fanout server\n\n");
                         printf("Recognized options are:\n");
-                        printf("  --port=PORT           port to run the service\
- on\n");
-                        printf("                        1986 (default)\n");
-                        printf("  --run-as=USER[:GROUP] drop permissions to def\
-ined levels\n");
-                        printf("  --daemon              fork to background\n");
-                        printf("  --client-limit=LIMIT  max connections\n");
-                        printf("                        BEWARE ulimit \
+                        printf("  --port=PORT              port to run the serv\
+ice on\n");
+                        printf("                           1986 (default)\n");
+                        printf("  --run-as=USER[:GROUP]    drop permissions to \
+defined levels\n");
+                        printf("  --daemon                 fork to background\n");
+                        printf("  --client-limit=LIMIT     max connections\n");
+                        printf("                           BEWARE ulimit \
 restrictions\n");
-                        printf("                        you may adjust it using\
+                        printf("                           you may adjust it using\
  ulimit -n X\n");
-                        printf("                        or sysctl -w \
+                        printf("                           or sysctl -w \
 fs.file-max=100000\n");
 
-                        printf("  --logfile=PATH        path to log file\n");
-                        printf("  --pidfile=PATH        path to pid file\n");
-                        printf("  --debug-level=LEVEL   verbosity level\n");
-                        printf("                        0 = ERROR (default)\n");
-                        printf("                        1 = WARNING\n");
-                        printf("                        2 = INFO\n");
-                        printf("                        3 = DEBUG\n");
-                        printf("  --help                show this info and exit\
+                        printf("  --logfile=PATH           path to log file\n");
+                        printf("  --max-logfile-size=SIZE  logfile size in MB\n");
+                        printf("  --pidfile=PATH           path to pid file\n");
+                        printf("  --debug-level=LEVEL      verbosity level\n");
+                        printf("                         \
+  0 = ERROR (default)\n");
+                        printf("                           1 = WARNING\n");
+                        printf("                           2 = INFO\n");
+                        printf("                           3 = DEBUG\n");
+                        printf("  --help                   show this info and exit\
 \n");
                         exit (EXIT_SUCCESS);
                         break;
@@ -267,6 +271,13 @@ fs.file-max=100000\n");
                                 }
                             }
                         }
+
+                        break;
+
+                    //max-logfile-size
+                    case 8:
+                        fanout_debug (3, "max logfile size: %s MB\n", optarg);
+                        max_logfile_size = atol (optarg);
 
                         break;
 
@@ -602,7 +613,7 @@ char *str_append (char *target, const char *data)
 
 void fanout_error(const char *msg)
 {
-    perror(msg);
+    fanout_debug (0, "%s: %s\n", msg, strerror (errno));
     exit (1);
 }
 
@@ -637,11 +648,24 @@ void fanout_debug (int level, const char *format, ...)
     message = str_append (message, data);
 
     if (debug_level >= level) {
-        if (daemonize && logfile != NULL) {
+        if ( ! daemonize)
+            printf ("%s", message);
+
+        if (logfile != NULL) {
+            if (max_logfile_size > 0) {
+                long current_pos;
+                long filesize;
+                if ((current_pos = ftell (logfile)) == -1)
+                    exit (EXIT_FAILURE);
+                //MB
+                filesize = (current_pos / 1024 / 1024);
+                if (filesize >= max_logfile_size) {
+                    if ((ftruncate(fileno (logfile), (off_t) 0)) == -1)
+                        exit (EXIT_FAILURE);
+                }
+            }
             fprintf (logfile, "%s", message);
             fflush (logfile);
-        } else {
-            printf ("%s", message);
         }
     }
 
