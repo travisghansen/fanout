@@ -313,8 +313,6 @@ fs.file-max=100000\n");
 
     if ((setsockopt (srvsock, SOL_SOCKET, SO_REUSEADDR, &optval, optlen)) == -1)
         fanout_error ("failed setting reuseaddr");
-    if ((setsockopt (srvsock, SOL_SOCKET, SO_KEEPALIVE, &optval, optlen)) == -1)
-        fanout_error ("failed setting keepalive");
 
     if (bind (srvsock, (struct sockaddr *) &serv_addr, sizeof (serv_addr)) < 0)
     {
@@ -496,6 +494,10 @@ resetting counter\n");
                 if (epoll_ctl (epollfd, EPOLL_CTL_ADD, client_i->fd, &ev) == -1) {
                     fanout_error ("epoll_ctl: srvsock");
                 }
+
+                if ((setsockopt (client_i->fd, SOL_SOCKET, SO_KEEPALIVE,
+                      &optval, optlen)) == -1)
+                    fanout_error ("failed setting keepalive");
 
                 //Shove current new connection in the front of the line
                 client_i->next = client_head;
