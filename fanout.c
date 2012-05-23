@@ -138,7 +138,8 @@ int main (int argc, char *argv[])
 {
     int srvsock, epollfd, nfds, efd, n, res;
     int portno = 1986;
-    u_int yes = 1;
+    int optval;
+    socklen_t optlen = sizeof(optval);
     u_int listen_backlog = 25;
     u_int max_events = 25;
     FILE *pidfile;
@@ -310,7 +311,10 @@ fs.file-max=100000\n");
     serv_addr.sin_addr.s_addr = INADDR_ANY;
     serv_addr.sin_port = htons (portno);
 
-    setsockopt (srvsock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof (yes));
+    if ((setsockopt (srvsock, SOL_SOCKET, SO_REUSEADDR, &optval, optlen)) == -1)
+        fanout_error ("failed setting reuseaddr");
+    if ((setsockopt (srvsock, SOL_SOCKET, SO_KEEPALIVE, &optval, optlen)) == -1)
+        fanout_error ("failed setting keepalive");
 
     if (bind (srvsock, (struct sockaddr *) &serv_addr, sizeof (serv_addr)) < 0)
     {
@@ -516,6 +520,7 @@ resetting counter\n");
                     clients_count = 0;
                 }
                 clients_count++;
+
             } else {
                 // Process events of other sockets...
                 client_i = client_head;
