@@ -99,6 +99,8 @@ u_int fd_limit = 0;
 int client_limit = -1;
 long server_start_time;
 
+char ipstr[INET6_ADDRSTRLEN];
+
 //announcement stats
 unsigned long long announcements_count = 0;
 
@@ -163,7 +165,7 @@ int main (int argc, char *argv[])
     struct client *client_tmp = NULL;
 
     socklen_t clilen;
-    struct sockaddr_in serv_addr, cli_addr;
+    struct sockaddr_in6 serv_addr, cli_addr;
 
     static struct option long_options[] = {
         {"port", 1, 0, 0},
@@ -307,22 +309,20 @@ xit\n");
         exit (EXIT_FAILURE);
     }
 
-    srvsock = socket (AF_INET, SOCK_STREAM, 0);
+    srvsock = socket (AF_INET6, SOCK_STREAM, 0);
     if (srvsock < 0)
         fanout_error ("ERROR opening socket");
 
     bzero((char *) &serv_addr, sizeof (serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_addr.s_addr = INADDR_ANY;
-    serv_addr.sin_port = htons (portno);
+    serv_addr.sin6_family = AF_INET6;
+    serv_addr.sin6_addr = in6addr_any;
+    serv_addr.sin6_port = htons (portno);
 
     if ((setsockopt (srvsock, SOL_SOCKET, SO_REUSEADDR, &optval, optlen)) == -1)
         fanout_error ("failed setting reuseaddr");
 
     if (bind (srvsock, (struct sockaddr *) &serv_addr, sizeof (serv_addr)) < 0)
-    {
         fanout_error ("ERROR on binding");
-    }
 
     if (listen (srvsock, listen_backlog) == -1)
         fanout_error ("ERROR listening on server socket");
@@ -519,8 +519,9 @@ resetting counter\n");
                     max_client_count = current_count;
                 }
 
+                char *peer = getsocketpeername (client_i->fd);
                 fanout_debug (2, "client socket %d connected from %s\n",
-                               client_i->fd, getsocketpeername (client_i->fd));
+                               client_i->fd, peer);
                 client_write (client_i, "debug!connected...\n");
                 subscribe (client_i, "all");
 
@@ -694,12 +695,13 @@ void fanout_debug (int level, const char *format, ...)
 
 char *getsocketpeername (int fd)
 {
-    struct sockaddr_in m_addr;
+    struct sockaddr_in6 m_addr;
     socklen_t len;
-
     len = sizeof m_addr;
+
     getpeername(fd, (struct sockaddr*)&m_addr, &len);
-    return inet_ntoa(m_addr.sin_addr);
+    inet_ntop(AF_INET6, &m_addr.sin6_addr, ipstr, sizeof ipstr);
+    return ipstr;
 }
 
 
@@ -799,8 +801,9 @@ struct client *get_client (int fd)
 
 void remove_client (struct client *c)
 {
+    char *peer = getsocketpeername (c->fd);
     fanout_debug (3, "removing client %d connected from %s from service\n",
-                   c->fd, getsocketpeername (c->fd));
+                   c->fd, peer);
     if (c->next != NULL) {
         c->next->previous = c->previous;
     }
