@@ -552,6 +552,7 @@ resetting counter\n");
                     fanout_error ("epoll_ctl: srvsock");
                 }
 
+                optval = 1;
                 if ((setsockopt (client_i->fd, SOL_SOCKET, SO_KEEPALIVE,
                       &optval, optlen)) == -1)
                     fanout_error ("failed setting keepalive");
