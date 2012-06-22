@@ -14,6 +14,10 @@
 #include <grp.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
 #include <arpa/inet.h>
 #include <sys/stat.h>
 #include <netinet/in.h>
@@ -141,7 +145,13 @@ struct rlimit s_rlimit;
 
 int main (int argc, char *argv[])
 {
-    int srvsock, epollfd, nfds, efd, n, res;
+    struct addrinfo *ai;
+    struct addrinfo hints;
+    memset (&hints, '\0', sizeof (hints));
+    hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
+    hints.ai_socktype = SOCK_STREAM;
+    int e;
+    int epollfd, nevents, efd, n, res;
     int portno = 1986;
     int optval;
     socklen_t optlen = sizeof(optval);
@@ -165,7 +175,7 @@ int main (int argc, char *argv[])
     struct client *client_tmp = NULL;
 
     socklen_t clilen;
-    struct sockaddr_in6 serv_addr, cli_addr;
+    struct sockaddr_storage cli_addr;
 
     static struct option long_options[] = {
         {"port", 1, 0, 0},
@@ -309,32 +319,64 @@ xit\n");
         exit (EXIT_FAILURE);
     }
 
-    srvsock = socket (AF_INET6, SOCK_STREAM, 0);
-    if (srvsock < 0)
-        fanout_error ("ERROR opening socket");
+   char buf[5];
+   snprintf(buf, sizeof buf, "%d", portno);
 
-    bzero((char *) &serv_addr, sizeof (serv_addr));
-    serv_addr.sin6_family = AF_INET6;
-    serv_addr.sin6_addr = in6addr_any;
-    serv_addr.sin6_port = htons (portno);
+    e = getaddrinfo (NULL, buf, &hints, &ai);
+    if (e != 0) {
+        fanout_error ("getaddrinfo");
+        exit (EXIT_FAILURE);
+    }
 
-    if ((setsockopt (srvsock, SOL_SOCKET, SO_REUSEADDR, &optval, optlen)) == -1)
-        fanout_error ("failed setting reuseaddr");
+    int nfds = 0;
+    struct addrinfo *runp = ai;
+    while (runp != NULL) {
+        ++nfds;
+        runp = runp->ai_next;
+    }
+    struct epoll_event fds[nfds];
 
-    if (bind (srvsock, (struct sockaddr *) &serv_addr, sizeof (serv_addr)) < 0)
-        fanout_error ("ERROR on binding");
+    for (nfds = 0, runp = ai; runp != NULL; runp = runp->ai_next)  {
+        fds[nfds].data.fd = socket (runp->ai_family, runp->ai_socktype, runp->ai_protocol);
+        if (fds[nfds].data.fd == -1) {
+            fanout_error ("ERROR opening socket");
+            exit (EXIT_FAILURE);
+        }
+        fds[nfds].events = EPOLLIN;
 
-    if (listen (srvsock, listen_backlog) == -1)
-        fanout_error ("ERROR listening on server socket");
+        optval = 1;
+        if (runp->ai_family==AF_INET6 && setsockopt (fds[nfds].data.fd, IPPROTO_IPV6, IPV6_V6ONLY, &optval, optlen) == -1) {
+            fanout_error ("failed setting IPV6_V6ONLY");
+            exit (EXIT_FAILURE);
+        }
 
-    if((epollfd = epoll_create (10)) < 0)
+        optval = 1;
+        if (setsockopt (fds[nfds].data.fd, SOL_SOCKET, SO_REUSEADDR, &optval, optlen) == -1) {
+            fanout_error ("failed setting REUSEADDR");
+            exit (EXIT_FAILURE);
+        }
+
+        if (bind (fds[nfds].data.fd, runp->ai_addr, runp->ai_addrlen ) != 0) {
+            fanout_error ("ERROR on binding");
+            exit (EXIT_FAILURE);
+        } else {
+            if (listen (fds[nfds].data.fd, listen_backlog) != 0) {
+                fanout_error ("ERROR listening on server socket");
+                exit (EXIT_FAILURE);
+            }
+            ++nfds;
+        }
+    }
+    freeaddrinfo(ai);
+
+    if((epollfd = epoll_create (nfds)) < 0)
         fanout_error ("ERROR creating epoll instance");
 
-    ev.events = EPOLLIN;
-    ev.data.fd = srvsock;
-
-    if (epoll_ctl (epollfd, EPOLL_CTL_ADD, srvsock, &ev) == -1) {
-        fanout_error ("epoll_ctl: srvsock");
+    for (n=0; n < nfds; n++) {
+        if (epoll_ctl (epollfd, EPOLL_CTL_ADD, fds[n].data.fd, &fds[n]) == -1) {
+            fanout_error ("epoll_ctl: srvsock");
+            exit (EXIT_FAILURE);
+        }
     }
 
 
@@ -450,25 +492,32 @@ xit\n");
     while (1) {
         fanout_debug (3, "server waiting for new activity\n");
 
-        if ((nfds = epoll_wait (epollfd, events, max_events, -1)) == -1)
+        if ((nevents = epoll_wait (epollfd, events, max_events, -1)) == -1)
             fanout_error ("epoll_wait");
 
-        if (nfds == 0) {
+        if (nevents == 0) {
             continue;
         }
 
-        for (n = 0; n < nfds; n++) {
+        for (n = 0; n < nevents; n++) {
             // new connection
             efd = events[n].data.fd;
-            if (efd == srvsock) {
 
+            int newconnection = 0;
+            for (n=0; n < nfds; n++) {
+                if (efd == fds[n].data.fd) {
+                    newconnection = 1;
+                    break;
+                }
+            }
+            if (newconnection) {
                 if ((client_i = calloc (1, sizeof (struct client))) == NULL) {
                     fanout_debug (0, "memory error\n");
                     continue;
                 }
 
                 clilen = sizeof (cli_addr);
-                if ((client_i->fd = accept (srvsock,
+                if ((client_i->fd = accept (efd,
                                              (struct sockaddr *)&cli_addr,
                                              &clilen)) == -1) {
                     fanout_debug (0, "%s\n", strerror (errno));
@@ -503,6 +552,7 @@ resetting counter\n");
                     fanout_error ("epoll_ctl: srvsock");
                 }
 
+                optval = 1;
                 if ((setsockopt (client_i->fd, SOL_SOCKET, SO_KEEPALIVE,
                       &optval, optlen)) == -1)
                     fanout_error ("failed setting keepalive");
@@ -572,7 +622,9 @@ resetting counter\n");
         }//end for
     }//end while (1)
 
-    close (srvsock);
+    for (n=0; n < nfds; n++) {
+        close (fds[n].data.fd);
+    }
     return 0; 
 }
 
@@ -695,12 +747,12 @@ void fanout_debug (int level, const char *format, ...)
 
 char *getsocketpeername (int fd)
 {
-    struct sockaddr_in6 m_addr;
+    struct sockaddr_storage m_addr;
     socklen_t len;
     len = sizeof m_addr;
 
     getpeername(fd, (struct sockaddr*)&m_addr, &len);
-    inet_ntop(AF_INET6, &m_addr.sin6_addr, ipstr, sizeof ipstr);
+    getnameinfo((struct sockaddr*)&m_addr, len, ipstr, sizeof ipstr, NULL, 0, NI_NUMERICHOST);
     return ipstr;
 }
 

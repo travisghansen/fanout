@@ -7,7 +7,7 @@ LFLAGS = -Wall $(DEBUG)
 
 .PHONY : $(OBJS)
 
-fanout :
+fanout : fanout.c
 	$(CC) $(LFLAGS) $(OBJS) -o $(PROJ) fanout.c
 
 clean:
