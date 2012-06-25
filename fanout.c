@@ -319,7 +319,7 @@ xit\n");
         exit (EXIT_FAILURE);
     }
 
-   char buf[5];
+   char buf[6];
    snprintf(buf, sizeof buf, "%d", portno);
 
     e = getaddrinfo (NULL, buf, &hints, &ai);
@@ -569,9 +569,10 @@ resetting counter\n");
                     max_client_count = current_count;
                 }
 
-                char *peer = getsocketpeername (client_i->fd);
-                fanout_debug (2, "client socket %d connected from %s\n",
-                               client_i->fd, peer);
+                //char *peer = getsocketpeername (client_i->fd);
+                //fanout_debug (2, "client socket %d connected from %s\n",
+                fanout_debug (2, "client socket %d connected\n",
+                               client_i->fd);
                 client_write (client_i, "debug!connected...\n");
                 subscribe (client_i, "all");
 
@@ -853,9 +854,10 @@ struct client *get_client (int fd)
 
 void remove_client (struct client *c)
 {
-    char *peer = getsocketpeername (c->fd);
-    fanout_debug (3, "removing client %d connected from %s from service\n",
-                   c->fd, peer);
+    //char *peer = getsocketpeername (c->fd);
+    //fanout_debug (3, "removing client %d connected from %s from service\n",
+    fanout_debug (3, "removing client %d connected from service\n",
+                   c->fd);
     if (c->next != NULL) {
         c->next->previous = c->previous;
     }
