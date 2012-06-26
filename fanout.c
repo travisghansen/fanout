@@ -319,8 +319,8 @@ xit\n");
         exit (EXIT_FAILURE);
     }
 
-   char buf[6];
-   snprintf(buf, sizeof buf, "%d", portno);
+    char buf[6];
+    snprintf(buf, sizeof buf, "%d", portno);
 
     e = getaddrinfo (NULL, buf, &hints, &ai);
     if (e != 0) {
