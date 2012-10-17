@@ -916,11 +916,11 @@ void shutdown_client (struct client *c)
 
     remove_client (c);
     if (shutdown (c->fd, 2) == -1) {
-        fanout_error ("ERROR calling shutdown on client");
+        fanout_debug (1, "ERROR calling shutdown on client %d\n", c->fd);
     }
     clear_socket_buffer (c->fd);
     if (close (c->fd) == -1) {
-        fanout_error ("ERRRO closing the socket");
+        fanout_debug (1, "ERROR closing the socket on client %d\n", c->fd);
     }
     destroy_client (c);
 }
