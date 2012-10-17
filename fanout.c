@@ -173,7 +173,6 @@ int main (int argc, char *argv[])
     struct epoll_event ev, events[max_events];
 
     struct client *client_i = NULL;
-    struct client *client_tmp = NULL;
     
     struct linger so_linger;
     so_linger.l_onoff = 1;
