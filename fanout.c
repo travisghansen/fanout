@@ -567,9 +567,9 @@ resetting counter\n");
                       &optval, optlen)) == -1)
                     fanout_error ("failed setting keepalive");
 
-                 if ((setsockopt (client_i->fd, SOL_SOCKET, SO_LINGER,
-                       &so_linger, sizeof so_linger)) == -1)
-                     fanout_error ("failed setting linger");
+                if ((setsockopt (client_i->fd, SOL_SOCKET, SO_LINGER,
+                      &so_linger, sizeof so_linger)) == -1)
+                    fanout_error ("failed setting linger");
 
                 //Shove current new connection in the front of the line
                 client_i->next = client_head;
@@ -599,10 +599,8 @@ resetting counter\n");
                 clients_count++;
 
             } else {
-                // Process events of other sockets...
-                client_i = client_head;
-                while (client_i != NULL) {
-                    if (efd == client_i->fd) {
+                //should be an existing client connection
+                if ((client_i = get_client (efd)) != NULL) {
                         // Process data from socket i
                         fanout_debug (3, "processing client %d\n",
                                        client_i->fd);
@@ -618,7 +616,6 @@ resetting counter\n");
                             }
                             fanout_debug (3, "client socket removed from epoll watch list\n");
                             shutdown_client (client_i);
-                            break;
                         } else {
                             // Process data in buffer
                             fanout_debug (3, "%d bytes read: [%.*s]\n", res,
@@ -627,13 +624,10 @@ resetting counter\n");
                                                         client_i->input_buffer,
                                                         buffer);
                             client_process_input_buffer (client_i);
-                            break;
                         }
-                    }
-                    client_i = client_i->next;
-                    if (client_i != NULL)
-                        fanout_debug (3, "moving to client_i %d\n", client_i->fd);
-                }//end while (client_i != NULL)
+
+                }
+                break;
             }//end else
         }//end for
     }//end while (1)
@@ -888,10 +882,9 @@ struct client *get_client (int fd)
 
 void remove_client (struct client *c)
 {
-    //char *peer = getsocketpeername (c->fd);
-    //fanout_debug (3, "removing client %d connected from %s from service\n",
-    fanout_debug (3, "removing client %d connected from service\n",
-                   c->fd);
+    char *peer = getsocketpeername (c->fd);
+    fanout_debug (3, "removing client %d connected from %s from service\n",
+                   c->fd, peer);
     if (c->next != NULL) {
         if (c->previous != NULL)
             fanout_debug (3, "setting previous on %d to %d\n",
