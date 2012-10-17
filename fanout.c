@@ -567,6 +567,10 @@ resetting counter\n");
                       &optval, optlen)) == -1)
                     fanout_error ("failed setting keepalive");
 
+                 if ((setsockopt (client_i->fd, SOL_SOCKET, SO_LINGER,
+                       &so_linger, sizeof so_linger)) == -1)
+                     fanout_error ("failed setting linger");
+
                 //Shove current new connection in the front of the line
                 client_i->next = client_head;
                 if (client_head != NULL) {
