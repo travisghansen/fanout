@@ -63,9 +63,10 @@ int strcpos (const char *haystack, const char c);
 char *substr (const char *s, int start, int stop);
 void str_swap_free (char **target, char *source);
 char *str_append (char *target, const char *data);
-void fanout_error(const char *msg);
+void clear_socket_buffer (int sock);
+void fanout_error (const char *msg);
 void fanout_debug (int level, const char *format, ...);
-char *getsocketpeername(int fd);
+char *getsocketpeername (int fd);
 
 int channel_exists (const char *channel_name);
 int channel_has_subscription (struct channel *c);
@@ -173,6 +174,12 @@ int main (int argc, char *argv[])
 
     struct client *client_i = NULL;
     struct client *client_tmp = NULL;
+    
+    struct linger so_linger;
+    so_linger.l_onoff = 1;
+    // immediately discard any remaining data
+    so_linger.l_linger = 0;
+
 
     socklen_t clilen;
     struct sockaddr_storage cli_addr;
@@ -355,7 +362,7 @@ xit\n");
             fanout_error ("failed setting REUSEADDR");
             exit (EXIT_FAILURE);
         }
-
+        
         if (bind (fds[nfds].data.fd, runp->ai_addr, runp->ai_addrlen ) != 0) {
             fanout_error ("ERROR on binding");
             exit (EXIT_FAILURE);
@@ -502,6 +509,9 @@ xit\n");
         for (n = 0; n < nevents; n++) {
             // new connection
             efd = events[n].data.fd;
+            fanout_debug (3, "processing event %d of %d\n", (n+1),
+                           nevents);
+            fanout_debug (3, "current event fd %d\n", efd);
 
             int newconnection = 0;
             for (n=0; n < nfds; n++) {
@@ -597,16 +607,14 @@ resetting counter\n");
                         if (res <= 0) {
                             fanout_debug (2, "client socket disconnected\n");
 
-                            client_tmp = client_i;
-                            client_i = client_i->next;
-
                             //del socket from watch list
                             if (epoll_ctl (epollfd, EPOLL_CTL_DEL,
-                                 client_tmp->fd, &ev) == -1) {
+                                 client_i->fd, &ev) == -1) {
                                 fanout_error ("epoll_ctl: srvsock");
                             }
-                            shutdown_client (client_tmp);
-                            continue;
+                            fanout_debug (3, "client socket removed from epoll watch list\n");
+                            shutdown_client (client_i);
+                            break;
                         } else {
                             // Process data in buffer
                             fanout_debug (3, "%d bytes read: [%.*s]\n", res,
@@ -615,9 +623,12 @@ resetting counter\n");
                                                         client_i->input_buffer,
                                                         buffer);
                             client_process_input_buffer (client_i);
+                            break;
                         }
                     }
                     client_i = client_i->next;
+                    if (client_i != NULL)
+                        fanout_debug (3, "moving to client_i %d\n", client_i->fd);
                 }//end while (client_i != NULL)
             }//end else
         }//end for
@@ -683,6 +694,25 @@ char *str_append (char *target, const char *data)
 
     return strcat (target, data);
 }
+
+
+void clear_socket_buffer (int sock)
+{
+    int res;
+    char buffer[1025];
+    for(;;) {
+        res = read (sock, buffer, 1024);
+        
+        if (res < 0) {
+            fanout_debug (0, "%s\n", "failed clearing socket buffer");
+            break;
+        }
+
+        if (!res)
+            break;
+    }
+}
+
 
 void fanout_error(const char *msg)
 {
@@ -752,8 +782,8 @@ char *getsocketpeername (int fd)
     socklen_t len;
     len = sizeof m_addr;
 
-    getpeername(fd, (struct sockaddr*)&m_addr, &len);
-    getnameinfo((struct sockaddr*)&m_addr, len, ipstr, sizeof ipstr, NULL, 0, NI_NUMERICHOST);
+    getpeername (fd, (struct sockaddr*)&m_addr, &len);
+    getnameinfo ((struct sockaddr*)&m_addr, len, ipstr, sizeof ipstr, NULL, 0, NI_NUMERICHOST);
     return ipstr;
 }
 
@@ -859,9 +889,15 @@ void remove_client (struct client *c)
     fanout_debug (3, "removing client %d connected from service\n",
                    c->fd);
     if (c->next != NULL) {
+        if (c->previous != NULL)
+            fanout_debug (3, "setting previous on %d to %d\n",
+                           c->next->fd, c->previous->fd);
         c->next->previous = c->previous;
     }
     if (c->previous != NULL) {
+        if (c->next != NULL)
+            fanout_debug (3, "setting next on %d to %d\n",
+                           c->previous->fd, c->next->fd);
         c->previous->next = c->next;
     }
     if (c == client_head) {
@@ -883,8 +919,13 @@ void shutdown_client (struct client *c)
     }
 
     remove_client (c);
-    shutdown (c->fd, 2);
-    close (c->fd);
+    if (shutdown (c->fd, 2) == -1) {
+        fanout_error ("ERROR calling shutdown on client");
+    }
+    clear_socket_buffer (c->fd);
+    if (close (c->fd) == -1) {
+        fanout_error ("ERRRO closing the socket");
+    }
     destroy_client (c);
 }
 
@@ -904,7 +945,8 @@ void client_write (struct client *c, const char *data)
     c->output_buffer = str_append (c->output_buffer, data);
 
     while (strlen (c->output_buffer) > 0) {
-        sent = send (c->fd, c->output_buffer, strlen (c->output_buffer), 0);
+        sent = send (c->fd, c->output_buffer, strlen (c->output_buffer),
+                      MSG_NOSIGNAL);
         if (sent == -1)
             break;
         fanout_debug (3, "wrote %d bytes\n", sent);
