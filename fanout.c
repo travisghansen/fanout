@@ -1150,7 +1150,7 @@ resetting counter\n");
         }
         subscription_i = subscription_i->next;
     }
-    fanout_debug (2, "announced messge to %d client(s) %s",
+    fanout_debug (2, "announced message to %d client(s) %s",
                    get_channel (channel)->subscription_count, s);
     if (announcements_count == ULLONG_MAX) {
         fanout_debug (1, "wow, you've announced alot..resetting counter\n");
