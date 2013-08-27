@@ -1,0 +1,72 @@
+#! /bin/sh
+
+### BEGIN INIT INFO
+# Provides:		fanout
+# Required-Start:	$remote_fs $syslog
+# Required-Stop:	$remote_fs $syslog
+# Default-Start:	2 3 4 5
+# Default-Stop:		
+# Short-Description:	Fanout SparkleShare pubsub server
+### END INIT INFO
+
+set -e
+
+SERVICE=fanout
+DAEMON=/usr/local/bin/$SERVICE
+PIDFILE=/var/run/$SERVICE.pid
+
+test -x $DAEMON || exit 0
+
+umask 022
+
+if test -f /etc/default/$SERVICE; then
+    . /etc/default/$SERVICE
+fi
+
+. /lib/lsb/init-functions
+
+if [ -n "$2" ]; then
+    FANOUT_OPTS="$FANOUT_OPTS $2"
+fi
+
+export PATH="${PATH:+$PATH:}/usr/sbin:/sbin"
+
+case "$1" in
+  start)
+	log_daemon_msg "Starting Fanout server" "fanout" || true
+	if start-stop-daemon --start --quiet --oknodo --pidfile $PIDFILE --exec $DAEMON -- $FANOUT_OPTS; then
+	    log_end_msg 0 || true
+	else
+	    log_end_msg 1 || true
+	fi
+	;;
+
+  stop)
+	log_daemon_msg "Stopping Fanout server" "fanout" || true
+	if start-stop-daemon --stop --quiet --oknodo --pidfile $PIDFILE; then
+	    log_end_msg 0 || true
+	else
+	    log_end_msg 1 || true
+	fi
+	;;
+
+  restart)
+	log_daemon_msg "Restarting Fanout server" "fanout" || true
+	start-stop-daemon --stop --quiet --oknodo --retry 30 --pidfile $PIDFILE
+	if start-stop-daemon --start --quiet --oknodo --pidfile $PIDFILE --exec $DAEMON -- $FANOUT_OPTS; then
+	    log_end_msg 0 || true
+	else
+	    log_end_msg 1 || true
+	fi
+	;;
+
+  status)
+	status_of_proc -p $PIDFILE $DAEMON $SERVICE && exit 0 || exit $?
+	;;
+
+  *)
+	log_action_msg "Usage: /etc/init.d/$SERVICE {start|stop|restart|status}" || true
+	exit 1
+esac
+
+exit 0
