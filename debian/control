@@ -1,0 +1,12 @@
+Source: fanout
+Maintainer: Elliot Kendall <elliot.kendall@gmail.com>
+Section: misc
+Priority: optional
+Standards-Version: 3.9.2
+Build-Depends: debhelper (>= 9)
+
+Package: fanout
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: simple pubsub server
+ fanout is a simple pubsub server
