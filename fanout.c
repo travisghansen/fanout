@@ -158,7 +158,7 @@ int main (int argc, char *argv[])
     socklen_t optlen = sizeof(optval);
     u_int listen_backlog = 25;
     u_int max_events = 25;
-    FILE *pidfile = NULL;
+    char *pidfilename;
     server_start_time = (long)time (NULL);
     char buffer[1025];
 
@@ -215,9 +215,7 @@ int main (int argc, char *argv[])
                         break;
                     // pidfile
                     case 3:
-                        if ((pidfile = fopen (optarg, "w+")) == NULL) {
-                            fanout_error ("ERROR cannot open pidfile");
-                        }
+                        pidfilename = optarg;
                         break;
                     //daemon
                     case 4:
@@ -398,9 +396,14 @@ xit\n");
            we can exit the parent process. */
         if (pid > 0) {
             /* Write pid to file */
+            FILE *pidfile = NULL;
+            pidfile = fopen (pidfilename, "w+");
             if (pidfile != NULL) {
                 fprintf (pidfile, "%d\n", (int) pid);
                 fclose (pidfile);
+            } else {
+                fanout_error ("ERROR cannot open pidfile");
+                exit (EXIT_FAILURE);
             }
             exit (EXIT_SUCCESS);
         }
