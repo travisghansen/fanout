@@ -152,7 +152,7 @@ int main (int argc, char *argv[])
     hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
     hints.ai_socktype = SOCK_STREAM;
     int e;
-    int epollfd, nevents, efd, n, res;
+    int epollfd, efd, n, res;
     int portno = 1986;
     int optval;
     socklen_t optlen = sizeof(optval);
@@ -496,6 +496,8 @@ xit\n");
     fanout_debug (2, "max client connections: %d\n", client_limit);
 
     while (1) {
+        int nevents;
+
         fanout_debug (3, "server waiting for new activity\n");
 
         if ((nevents = epoll_wait (epollfd, events, max_events, -1)) == -1)
@@ -695,9 +697,10 @@ char *str_append (char *target, const char *data)
 
 void clear_socket_buffer (int sock)
 {
-    int res;
     char buffer[1025];
     for(;;) {
+        int res;
+
         res = read (sock, buffer, 1024);
         
         if (res < 0) {
@@ -905,9 +908,9 @@ void remove_client (struct client *c)
 void shutdown_client (struct client *c)
 {
     struct subscription *subscription_i = subscription_head;
-    struct subscription *subscription_tmp;
 
     while (subscription_i != NULL) {
+        struct subscription *subscription_tmp;
         subscription_tmp = subscription_i;
         subscription_i = subscription_i->next;
         if (c == subscription_tmp->client)
@@ -936,11 +939,10 @@ void destroy_client (struct client *c)
 
 void client_write (struct client *c, const char *data)
 {
-    int sent;
-
     c->output_buffer = str_append (c->output_buffer, data);
 
     while (strlen (c->output_buffer) > 0) {
+        int sent;
         sent = send (c->fd, c->output_buffer, strlen (c->output_buffer),
                       MSG_NOSIGNAL);
         if (sent == -1)
@@ -956,7 +958,6 @@ void client_write (struct client *c, const char *data)
 
 void client_process_input_buffer (struct client *c)
 {
-    char *line;
     char *message;
     char *action;
     char *channel;
@@ -965,6 +966,7 @@ void client_process_input_buffer (struct client *c)
 
     fanout_debug (3, "full buffer\n\n%s\n\n", c->input_buffer);
     while ((i = strcpos (c->input_buffer, '\n')) >= 0) {
+        char *line;
         line = substr (c->input_buffer, 0, i -1);
         fanout_debug (3, "buffer has a newline at char %d\n", i);
         fanout_debug (3, "line is %d chars: %s\n", (u_int) strlen (line), line);
