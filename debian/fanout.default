@@ -2,4 +2,4 @@
 # Default settings for fanout server
 
 # Options to pass to fanout
-FANOUT_OPTS="--daemon --pidfile=/var/run/fanout.pid --run-as=fanout:fanout --logfile=/var/log/fanout.log --debug-level=2"
+FANOUT_OPTS="--daemon --pidfile=/var/run/fanout.pid --run-as=fanout:fanout --logfile=/var/log/fanout/fanout.log --debug-level=2"

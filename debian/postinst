@@ -1,0 +1,3 @@
+groupadd -f fanout
+useradd -g fanout -d /var/run/fanout -m -s /bin/false fanout
+chown fanout:fanout /var/log/fanout
