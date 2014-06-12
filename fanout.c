@@ -680,6 +680,8 @@ void str_swap_free (char **target, char *source)
 
 char *str_append (char *target, const char *data)
 {
+    char *newtarget;
+
     if (data == NULL) {
         return target;
     }
@@ -690,9 +692,14 @@ char *str_append (char *target, const char *data)
     }
 
     int len = strlen (target) + strlen (data) + 1;
-    target = realloc (target, len);
+    newtarget = realloc (target, len);
+    if (newtarget == NULL) {
+        fanout_error ("ERROR unable to allocate memory");
+        exit (EXIT_FAILURE);
+    }
+    newtarget = strcat (newtarget, data);
 
-    return strcat (target, data);
+    return newtarget;
 }
 
 
