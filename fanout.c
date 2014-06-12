@@ -341,6 +341,7 @@ xit\n");
     struct epoll_event fds[nfds];
 
     for (nfds = 0, runp = ai; runp != NULL; runp = runp->ai_next)  {
+        memset(&fds[nfds], 0, sizeof(struct epoll_event));
         fds[nfds].data.fd = socket (runp->ai_family, runp->ai_socktype, runp->ai_protocol);
         if (fds[nfds].data.fd == -1) {
             fanout_error ("ERROR opening socket");
