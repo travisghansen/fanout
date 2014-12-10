@@ -254,7 +254,6 @@ fs.file-max=100000\n");
                         printf("  --help                   show this info and e\
 xit\n");
                         exit (EXIT_SUCCESS);
-                        break;
                     //client-limit
                     case 6:
                         client_limit = atoi (optarg);
