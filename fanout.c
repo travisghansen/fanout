@@ -708,9 +708,7 @@ void clear_socket_buffer (int sock)
 {
     char buffer[1025];
     for(;;) {
-        int res;
-
-        res = read (sock, buffer, 1024);
+        int res = read (sock, buffer, 1024);
         
         if (res < 0) {
             fanout_debug (0, "%s\n", "failed clearing socket buffer");
@@ -919,9 +917,9 @@ void shutdown_client (struct client *c)
     struct subscription *subscription_i = subscription_head;
 
     while (subscription_i != NULL) {
-        struct subscription *subscription_tmp;
-        subscription_tmp = subscription_i;
+        struct subscription *subscription_tmp = subscription_i;
         subscription_i = subscription_i->next;
+
         if (c == subscription_tmp->client)
             unsubscribe (c, subscription_tmp->channel->name);
     }
@@ -951,8 +949,7 @@ void client_write (struct client *c, const char *data)
     c->output_buffer = str_append (c->output_buffer, data);
 
     while (strlen (c->output_buffer) > 0) {
-        int sent;
-        sent = send (c->fd, c->output_buffer, strlen (c->output_buffer),
+        int sent = send (c->fd, c->output_buffer, strlen (c->output_buffer),
                       MSG_NOSIGNAL);
         if (sent == -1)
             break;
@@ -975,8 +972,7 @@ void client_process_input_buffer (struct client *c)
 
     fanout_debug (3, "full buffer\n\n%s\n\n", c->input_buffer);
     while ((i = strcpos (c->input_buffer, '\n')) >= 0) {
-        char *line;
-        line = substr (c->input_buffer, 0, i -1);
+        char *line = substr (c->input_buffer, 0, i -1);
         fanout_debug (3, "buffer has a newline at char %d\n", i);
         fanout_debug (3, "line is %d chars: %s\n", (u_int) strlen (line), line);
 
