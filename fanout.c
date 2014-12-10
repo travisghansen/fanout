@@ -73,7 +73,7 @@ int channel_has_subscription (struct channel *c);
 struct channel *get_channel (const char *channel_name);
 void remove_channel (struct channel *c);
 void destroy_channel (struct channel *c);
-u_int channel_count ();
+u_int channel_count (void);
 
 
 struct client *get_client (int fd);
@@ -82,14 +82,14 @@ void shutdown_client (struct client *c);
 void destroy_client (struct client *c);
 void client_write (struct client *c, const char *data);
 void client_process_input_buffer (struct client *c);
-u_int client_count ();
+u_int client_count (void);
 
 
 struct subscription *get_subscription (struct client *c,
                                         struct channel *channel);
 void remove_subscription (struct subscription *s);
 void destroy_subscription (struct subscription *s);
-u_int subscription_count ();
+u_int subscription_count (void);
 
 
 void announce (const char *channel_name, const char *message);
