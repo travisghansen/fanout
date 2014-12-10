@@ -152,7 +152,7 @@ int main (int argc, char *argv[])
     hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
     hints.ai_socktype = SOCK_STREAM;
     int e;
-    int epollfd, efd, n, res;
+    int epollfd, efd, res;
     int portno = 1986;
     int optval;
     socklen_t optlen = sizeof(optval);
@@ -376,7 +376,7 @@ xit\n");
     if((epollfd = epoll_create (nfds)) < 0)
         fanout_error ("ERROR creating epoll instance");
 
-    for (n=0; n < nfds; n++) {
+    for (int n = 0; n < nfds; n++) {
         if (epoll_ctl (epollfd, EPOLL_CTL_ADD, fds[n].data.fd, &fds[n]) == -1) {
             fanout_error ("epoll_ctl: srvsock");
             exit (EXIT_FAILURE);
@@ -510,7 +510,7 @@ xit\n");
             continue;
         }
 
-        for (n = 0; n < nevents; n++) {
+        for (int n = 0; n < nevents; n++) {
             // new connection
             efd = events[n].data.fd;
             fanout_debug (3, "processing event %d of %d\n", (n+1),
@@ -518,8 +518,8 @@ xit\n");
             fanout_debug (3, "current event fd %d\n", efd);
 
             int newconnection = 0;
-            for (n=0; n < nfds; n++) {
-                if (efd == fds[n].data.fd) {
+            for (int m = 0; m < nfds; m++) {
+                if (efd == fds[m].data.fd) {
                     newconnection = 1;
                     break;
                 }
@@ -636,7 +636,7 @@ resetting counter\n");
         }//end for
     }//end while (1)
 
-    for (n=0; n < nfds; n++) {
+    for (int n = 0; n < nfds; n++) {
         close (fds[n].data.fd);
     }
     return 0; 
@@ -656,8 +656,7 @@ int is_numeric (char *str)
 
 int strcpos (const char *haystack, const char c)
 {
-    int i;
-    for (i = 0; i <= strlen (haystack); i++) {
+    for (int i = 0; i <= strlen (haystack); i++) {
         if (haystack[i] == c)
             return i;
     }
