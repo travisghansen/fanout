@@ -73,7 +73,7 @@ int channel_has_subscription (struct channel *c);
 struct channel *get_channel (const char *channel_name);
 void remove_channel (struct channel *c);
 void destroy_channel (struct channel *c);
-u_int channel_count ();
+u_int channel_count (void);
 
 
 struct client *get_client (int fd);
@@ -82,14 +82,14 @@ void shutdown_client (struct client *c);
 void destroy_client (struct client *c);
 void client_write (struct client *c, const char *data);
 void client_process_input_buffer (struct client *c);
-u_int client_count ();
+u_int client_count (void);
 
 
 struct subscription *get_subscription (struct client *c,
                                         struct channel *channel);
 void remove_subscription (struct subscription *s);
 void destroy_subscription (struct subscription *s);
-u_int subscription_count ();
+u_int subscription_count (void);
 
 
 void announce (const char *channel_name, const char *message);
@@ -152,7 +152,7 @@ int main (int argc, char *argv[])
     hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
     hints.ai_socktype = SOCK_STREAM;
     int e;
-    int epollfd, efd, n, res;
+    int epollfd, efd, res;
     int portno = 1986;
     int optval;
     socklen_t optlen = sizeof(optval);
@@ -254,7 +254,6 @@ fs.file-max=100000\n");
                         printf("  --help                   show this info and e\
 xit\n");
                         exit (EXIT_SUCCESS);
-                        break;
                     //client-limit
                     case 6:
                         client_limit = atoi (optarg);
@@ -377,7 +376,7 @@ xit\n");
     if((epollfd = epoll_create (nfds)) < 0)
         fanout_error ("ERROR creating epoll instance");
 
-    for (n=0; n < nfds; n++) {
+    for (int n = 0; n < nfds; n++) {
         if (epoll_ctl (epollfd, EPOLL_CTL_ADD, fds[n].data.fd, &fds[n]) == -1) {
             fanout_error ("epoll_ctl: srvsock");
             exit (EXIT_FAILURE);
@@ -511,7 +510,7 @@ xit\n");
             continue;
         }
 
-        for (n = 0; n < nevents; n++) {
+        for (int n = 0; n < nevents; n++) {
             // new connection
             efd = events[n].data.fd;
             fanout_debug (3, "processing event %d of %d\n", (n+1),
@@ -519,8 +518,8 @@ xit\n");
             fanout_debug (3, "current event fd %d\n", efd);
 
             int newconnection = 0;
-            for (n=0; n < nfds; n++) {
-                if (efd == fds[n].data.fd) {
+            for (int m = 0; m < nfds; m++) {
+                if (efd == fds[m].data.fd) {
                     newconnection = 1;
                     break;
                 }
@@ -637,7 +636,7 @@ resetting counter\n");
         }//end for
     }//end while (1)
 
-    for (n=0; n < nfds; n++) {
+    for (int n = 0; n < nfds; n++) {
         close (fds[n].data.fd);
     }
     return 0; 
@@ -657,8 +656,7 @@ int is_numeric (char *str)
 
 int strcpos (const char *haystack, const char c)
 {
-    int i;
-    for (i = 0; i <= strlen (haystack); i++) {
+    for (int i = 0; i <= strlen (haystack); i++) {
         if (haystack[i] == c)
             return i;
     }
@@ -710,9 +708,7 @@ void clear_socket_buffer (int sock)
 {
     char buffer[1025];
     for(;;) {
-        int res;
-
-        res = read (sock, buffer, 1024);
+        int res = read (sock, buffer, 1024);
         
         if (res < 0) {
             fanout_debug (0, "%s\n", "failed clearing socket buffer");
@@ -921,9 +917,9 @@ void shutdown_client (struct client *c)
     struct subscription *subscription_i = subscription_head;
 
     while (subscription_i != NULL) {
-        struct subscription *subscription_tmp;
-        subscription_tmp = subscription_i;
+        struct subscription *subscription_tmp = subscription_i;
         subscription_i = subscription_i->next;
+
         if (c == subscription_tmp->client)
             unsubscribe (c, subscription_tmp->channel->name);
     }
@@ -953,8 +949,7 @@ void client_write (struct client *c, const char *data)
     c->output_buffer = str_append (c->output_buffer, data);
 
     while (strlen (c->output_buffer) > 0) {
-        int sent;
-        sent = send (c->fd, c->output_buffer, strlen (c->output_buffer),
+        int sent = send (c->fd, c->output_buffer, strlen (c->output_buffer),
                       MSG_NOSIGNAL);
         if (sent == -1)
             break;
@@ -977,8 +972,7 @@ void client_process_input_buffer (struct client *c)
 
     fanout_debug (3, "full buffer\n\n%s\n\n", c->input_buffer);
     while ((i = strcpos (c->input_buffer, '\n')) >= 0) {
-        char *line;
-        line = substr (c->input_buffer, 0, i -1);
+        char *line = substr (c->input_buffer, 0, i -1);
         fanout_debug (3, "buffer has a newline at char %d\n", i);
         fanout_debug (3, "line is %d chars: %s\n", (u_int) strlen (line), line);
 
