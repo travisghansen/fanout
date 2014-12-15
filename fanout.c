@@ -545,8 +545,15 @@ xit\n");
                 if (client_limit > 0 && current_count >= client_limit) {
                     fanout_debug (1, "hit connection limit of: %d\n",
                                    client_limit);
-                    send (client_i->fd, "debug!busy\n",
+
+                    errno = 0;
+                    ssize_t sentout = send (client_i->fd, "debug!busy\n",
                            strlen ("debug!busy\n"), 0);
+
+                    if ((sentout == -1) && errno) {
+                        fanout_debug (0, "%s\n", strerror (errno));
+                    }
+
                     close (client_i->fd);
                     free (client_i);
                     if (client_limit_count == ULLONG_MAX) {
