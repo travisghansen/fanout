@@ -1,19 +1,12 @@
-PROJ = fanout
-OBJS = 
-CC = gcc
-DEBUG = -g
-CFLAGS = -Wall -c $(DEBUG)
-LFLAGS = -Wall $(DEBUG)
+SRC = fanout.c
+OBJ = ${SRC:.c=.o}
+CFLAGS = -std=c99 -Wall -g
 DESTDIR = /
 
-.PHONY : $(OBJS)
+fanout:
 
-fanout : fanout.c
-	$(CC) $(LFLAGS) $(OBJS) -o $(PROJ) fanout.c
-
-install:
-	mkdir -p $(DESTDIR)/usr/sbin
-	cp fanout $(DESTDIR)/usr/sbin/fanout
+install: fanout
+	install -Dm755 fanout $(DESTDIR)/usr/bin/fanout
 
 clean:
-	test \! -f fanout || rm fanout
+	rm -f fanout
