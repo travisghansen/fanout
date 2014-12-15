@@ -158,7 +158,7 @@ int main (int argc, char *argv[])
     socklen_t optlen = sizeof(optval);
     u_int listen_backlog = 25;
     u_int max_events = 25;
-    char *pidfilename;
+    char *pidfilename = NULL;
     server_start_time = (long)time (NULL);
     char buffer[1025];
 
