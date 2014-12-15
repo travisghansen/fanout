@@ -610,6 +610,7 @@ resetting counter\n");
                                        client_i->fd);
                         memset (buffer, 0, sizeof (buffer));
                         res = recv (client_i->fd, buffer, 1024, 0);
+                        buffer[1024] = '\0';
                         if (res <= 0) {
                             fanout_debug (2, "client socket disconnected\n");
 
