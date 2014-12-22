@@ -158,7 +158,7 @@ int main (int argc, char *argv[])
     socklen_t optlen = sizeof(optval);
     u_int listen_backlog = 25;
     u_int max_events = 25;
-    char *pidfilename;
+    char *pidfilename = NULL;
     server_start_time = (long)time (NULL);
     char buffer[1025];
 
@@ -545,8 +545,15 @@ xit\n");
                 if (client_limit > 0 && current_count >= client_limit) {
                     fanout_debug (1, "hit connection limit of: %d\n",
                                    client_limit);
-                    send (client_i->fd, "debug!busy\n",
+
+                    errno = 0;
+                    ssize_t sentout = send (client_i->fd, "debug!busy\n",
                            strlen ("debug!busy\n"), 0);
+
+                    if ((sentout == -1) && errno) {
+                        fanout_debug (0, "%s\n", strerror (errno));
+                    }
+
                     close (client_i->fd);
                     free (client_i);
                     if (client_limit_count == ULLONG_MAX) {
@@ -610,6 +617,7 @@ resetting counter\n");
                                        client_i->fd);
                         memset (buffer, 0, sizeof (buffer));
                         res = recv (client_i->fd, buffer, 1024, 0);
+                        buffer[1024] = '\0';
                         if (res <= 0) {
                             fanout_debug (2, "client socket disconnected\n");
 
