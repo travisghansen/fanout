@@ -503,8 +503,13 @@ xit\n");
 
         fanout_debug (3, "server waiting for new activity\n");
 
-        if ((nevents = epoll_wait (epollfd, events, max_events, -1)) == -1)
+        errno = 0;
+        if ((nevents = epoll_wait (epollfd, events, max_events, -1)) == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
             fanout_error ("epoll_wait");
+        }
 
         if (nevents == 0) {
             continue;
