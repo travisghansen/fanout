@@ -12,7 +12,7 @@
 set -e
 
 SERVICE=fanout
-DAEMON=/usr/sbin/$SERVICE
+DAEMON=/usr/bin/$SERVICE
 PIDFILE=/var/run/$SERVICE.pid
 
 test -x $DAEMON || exit 0
