@@ -317,7 +317,7 @@ xit\n");
         exit (EXIT_FAILURE);
     }
 
-    if ( ! portno > 0) {
+    if ( ! (portno > 0)) {
         fanout_debug (0, "ERROR invalid port\n");
         exit (EXIT_FAILURE);
     }
